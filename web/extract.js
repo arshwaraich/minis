@@ -38,6 +38,7 @@ export function loadImage(src) {
   });
 }
 
+const lerp = (a, b, t) => a + (b - a) * t;
 const hex = (c) => '#' + c.map((v) => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0')).join('');
 const lum = (r, g, b) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
 function median(arr) {
@@ -142,6 +143,19 @@ export async function extractTraits(src, opts = {}) {
     open: bs.jawOpen || 0,
   };
 
+  // ---- brow centre-lines relative to each eye centre (for brow shape)
+  const browLine = (up, lo, a, b) => {
+    const ec = [(F(a)[0] + F(b)[0]) / 2, (F(a)[1] + F(b)[1]) / 2];
+    return up.map((u, i) => {
+      const p = F(u), q = F(lo[i]);
+      return [+(((p[0] + q[0]) / 2) - ec[0]).toFixed(4), +(((p[1] + q[1]) / 2) - ec[1]).toFixed(4), +(Math.hypot(p[0] - q[0], p[1] - q[1])).toFixed(4)];
+    });
+  };
+  const brows = [
+    browLine([107, 66, 105, 63, 70], [55, 65, 52, 53, 46], 33, 133),
+    browLine([336, 296, 334, 293, 300], [285, 295, 282, 283, 276], 362, 263),
+  ].map((b) => ({ side: Math.sign(b[2][0] + (b === null ? 0 : 0)) || 0, pts: b }));
+
   // ---- colours
   const skinC = lmPatch([50, 280, 151], 0.045);
   const browC = (() => {
@@ -180,11 +194,28 @@ export async function extractTraits(src, opts = {}) {
   let earN = 0, earHair = 0;
   const glR = [], glG = [], glB = [], hwR = [], hwG = [], hwB = [];
   let eyeN = 0, eyeAcc = 0, hwN = 0, hwAcc = 0, bangN = 0, bangHair = 0;
+  const skinPx = [], hairLine = [-Infinity, -Infinity], glBox = [[9, -9, 9, -9], [9, -9, 9, -9]], glPx = [];
+  let hwMinV = Infinity, hwMaxV = -Infinity, crownN = 0, crownHw = 0, earN5 = 0, earRingN = 0, lapSum = 0, lapN = 0, hairLumSum = 0;
+  const erR = [], erG = [], erB = [];
   const step = Math.max(1, Math.round(W / 90));
   for (let y = 0; y < h; y += step) for (let x = 0; x < w; x += step) {
     const c = cat(x, y);
     const [u, v] = toF(x, y);
     const au = Math.abs(u);
+    if (c === 3 && au < 0.4 && v > vEye + 0.08 && v < vChin - 0.18) skinPx.push(rgbAt(x, y));
+    if (c === 1 && au > 0.04 && au < 0.36 && v < vBrow) hairLine[u < 0 ? 0 : 1] = Math.max(hairLine[u < 0 ? 0 : 1], v);
+    if (c === 5 && au < 0.6 && v > vEye - 0.2 && v < vEye + 0.2) {
+      const b = glBox[u < 0 ? 0 : 1];
+      b[0] = Math.min(b[0], u); b[1] = Math.max(b[1], u); b[2] = Math.min(b[2], v); b[3] = Math.max(b[3], v);
+      glPx.push(rgbAt(x, y));
+    }
+    if (c === 5 && au < 0.75 && v < vTop + 0.05 && v > vTop - 0.9) { hwMinV = Math.min(hwMinV, v); hwMaxV = Math.max(hwMaxV, v); }
+    if (au > 0.42 && au < 0.85 && v > vEye + 0.35 && v < vChin + 0.35) { earN5++; if (c === 5) { earRingN++; const p = rgbAt(x, y); erR.push(p[0]); erG.push(p[1]); erB.push(p[2]); } }
+    if (c === 1 && au < 0.8 && x > 1 && y > 1 && x < w - 2 && y < h - 2) {
+      const g0 = grayAt(x, y);
+      const lap = Math.abs(4 * g0 - grayAt(x - 2, y) - grayAt(x + 2, y) - grayAt(x, y - 2) - grayAt(x, y + 2));
+      lapSum += lap; lapN++; hairLumSum += g0;
+    }
     if (c === 1) {
       hairArea++;
       if (au < 0.9 && v < vChin + 1.5) {
@@ -210,6 +241,11 @@ export async function extractTraits(src, opts = {}) {
   // Lowest row (per side) where the hair band is at least ~0.08 face-widths wide.
   for (const rows of sideRows) for (const [bin, n] of Object.entries(rows)) {
     if (n * step / W >= 0.08) sideLow = Math.max(sideLow, vTop + (+bin + 1) * 0.03);
+  }
+  // crown coverage by accessories (scarf/hat vs a band)
+  for (let y = 0; y < h; y += step) for (let x = 0; x < w; x += step) {
+    const [u, v] = toF(x, y);
+    if (Math.abs(u) < 0.3 && v > headTop && v < headTop + 0.18) { crownN++; if (cat(x, y) === 5) crownHw++; }
   }
   // Is the top of the head inside the photo at all?
   const topInImg = inImg(...fromF(0, vTop - 0.45));
@@ -250,11 +286,40 @@ export async function extractTraits(src, opts = {}) {
   const glassesScore = gp.bridge + Math.min(gp.underL, gp.underR) + (gp.sideL + gp.sideR) / 2;
   const lensY = Y(lmPatch([468, 473], 0.06));
 
+  const band = (px, lo, hi) => {
+    if (px.length < 8) return null;
+    const sorted = px.slice().sort((a, b) => lum(...a) - lum(...b));
+    const sl = sorted.slice(Math.floor(sorted.length * lo), Math.max(Math.floor(sorted.length * lo) + 1, Math.floor(sorted.length * hi)));
+    return [0, 1, 2].map((k) => median(sl.map((c) => c[k])));
+  };
+  // Eye whites as a neutral reference for the photo's colour cast.
+  const sclera = (() => {
+    const px = [];
+    for (const [ic, inner, outer] of [[468, 133, 33], [473, 362, 263]]) {
+      const c0 = F(ic);
+      for (const corner of [inner, outer]) {
+        const c1 = F(corner);
+        for (let t = 0.45; t <= 0.8; t += 0.05) for (const dv of [-0.006, 0, 0.006]) {
+          const [x, y] = fromF(lerp(c0[0], c1[0], t), lerp(c0[1], c1[1], t) + dv);
+          if (inImg(x, y)) px.push(rgbAt(x, y));
+        }
+      }
+    }
+    return band(px, 0.6, 0.95);
+  })();
+  let wb = [1, 1, 1];
+  if (sclera && lum(...sclera) > 70) {
+    const m = (sclera[0] + sclera[1] + sclera[2]) / 3;
+    wb = sclera.map((c) => Math.max(0.85, Math.min(1.18, m / Math.max(1, c))));
+  }
+  const skinBright = band(skinPx, 0.72, 0.95);
+  const glassFrame = band(glPx, 0, 0.3);
+  const glDims = glBox.filter((b) => b[1] > b[0]).map((b) => [b[1] - b[0], b[3] - b[2]]);
   const hairC = (() => {
     if (hairR.length < 8) return null;
     const idx = hairR.map((_, i) => i).sort((a, b) => lum(hairR[a], hairG[a], hairB[a]) - lum(hairR[b], hairG[b], hairB[b]));
-    const band = idx.slice(Math.floor(idx.length * 0.5), Math.floor(idx.length * 0.8));
-    return medianColor(band.map((i) => hairR[i]), band.map((i) => hairG[i]), band.map((i) => hairB[i]));
+    const sl = idx.slice(Math.floor(idx.length * 0.55), Math.floor(idx.length * 0.88));
+    return medianColor(sl.map((i) => hairR[i]), sl.map((i) => hairG[i]), sl.map((i) => hairB[i]));
   })();
   let debug;
   if (opts.debug) {
@@ -271,17 +336,22 @@ export async function extractTraits(src, opts = {}) {
   }
   return {
     debug,
-    v: 1,
+    v: 2,
     geo,
+    brows: brows.map((b, i) => ({ u: i === 0 ? Math.sign(F(33)[0]) : Math.sign(F(263)[0]), pts: b.pts })),
+    wb,
     color: {
       skin: skinC && hex(skinC),
+      skinBright: skinBright && hex(skinBright),
+      sclera: sclera && hex(sclera),
+      earrings: erR.length > 4 ? hex(medianColor(erR, erG, erB)) : null,
       hair: hairC && hex(hairC),
       brow: browC && hex(browC),
       iris: irisC && hex(irisC),
       lip: lipC && hex(lipC),
       shirt: clR.length > 8 ? hex(medianColor(clR, clG, clB)) : null,
       chin: chinC && hex(chinC),
-      glasses: glR.length > 8 ? hex(medianColor(glR, glG, glB)) : null,
+      glasses: glassFrame && hex(glassFrame),
       headwear: hwR.length > 8 ? hex(medianColor(hwR, hwG, hwB)) : null,
     },
     hair: {
@@ -293,8 +363,14 @@ export async function extractTraits(src, opts = {}) {
       side: isFinite(sideLow) ? (sideLow - vTop) / (vChin - vTop) : 0,
       width: hairWide,
       ears: earN ? earHair / earN : 0,
+      texture: lapN ? lapSum / lapN / Math.max(20, hairLumSum / lapN) : 0,
+      fringeSide: isFinite(hairLine[0]) && isFinite(hairLine[1]) ? hairLine[1] - hairLine[0] : 0, // + = hair lower on image-right
+      hwTop: isFinite(hwMinV) ? vTop - hwMinV : 0, hwBottom: isFinite(hwMaxV) ? vTop - hwMaxV : 0,
+      crownHw: crownN ? crownHw / crownN : 0,
+      hwArea: hwAcc * step * step / (W * W),
     },
     beard: { chin: chinY / cheekY, jaw: jawY / cheekY, lip: philY / cheekY, chinSat: sat(chinC) / sat(cheekC), lipSat: sat(philC) / sat(cheekC) },
-    glasses: { score: glassesScore, seg: eyeN ? eyeAcc / eyeN : 0, parts: gp, lens: lensY / cheekY },
+    glasses: { score: glassesScore, seg: eyeN ? eyeAcc / eyeN : 0, parts: gp, lens: lensY / cheekY, w: glDims.length ? median(glDims.map((d) => d[0])) : 0, h: glDims.length ? median(glDims.map((d) => d[1])) : 0 },
+    earrings: earN5 ? earRingN / earN5 : 0,
   };
 }

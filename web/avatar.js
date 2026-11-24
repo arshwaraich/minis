@@ -28,8 +28,8 @@ function hexLum(h) {
 function tidy(hex, { lift = 0.06, sat = 1.15, minL = 0.12, maxL = 0.9 } = {}) {
   const c = new THREE.Color(hex);
   const hsl = {};
-  c.getHSL(hsl);
-  c.setHSL(hsl.h, clamp(hsl.s * sat, 0, 1), clamp(hsl.l + lift, minL, maxL));
+  c.getHSL(hsl, THREE.SRGBColorSpace);
+  c.setHSL(hsl.h, clamp(hsl.s * sat, 0, 1), clamp(hsl.l + lift, minL, maxL), THREE.SRGBColorSpace);
   return '#' + c.getHexString();
 }
 function mix(a, b, t) {
@@ -37,8 +37,8 @@ function mix(a, b, t) {
 }
 function shade(hex, dl, ds = 1) {
   const c = new THREE.Color(hex), hsl = {};
-  c.getHSL(hsl);
-  c.setHSL(hsl.h, clamp(hsl.s * ds, 0, 1), clamp(hsl.l + dl, 0, 1));
+  c.getHSL(hsl, THREE.SRGBColorSpace);
+  c.setHSL(hsl.h, clamp(hsl.s * ds, 0, 1), clamp(hsl.l + dl, 0, 1), THREE.SRGBColorSpace);
   return '#' + c.getHexString();
 }
 
@@ -51,51 +51,69 @@ export function traitsToParams(t, name = '') {
   const g = t.geo || {};
   const c = t.color || {};
   const H = t.hair || {};
+  // half-strength white balance from the eye whites
+  const wb = [1, 1, 1]; // eye-white balance measured (t.wb) but sclera is too pink to trust
+  const fix = (h) => {
+    if (!h) return h;
+    const cc = new THREE.Color(h);
+    cc.convertLinearToSRGB();
+    cc.r = clamp(cc.r * wb[0], 0, 1); cc.g = clamp(cc.g * wb[1], 0, 1); cc.b = clamp(cc.b * wb[2], 0, 1);
+    cc.convertSRGBToLinear();
+    return '#' + cc.getHexString();
+  };
   const kid = (g.faceH ?? 1.2) < 1.1;
 
   // hair length: hair that never reaches the ears reads as short even when a
   // thin strand behind the ear goes lower.
   let side = H.side ?? 0.4;
   if ((H.ears ?? 0) < 0.25 && side < 0.92) side = Math.min(side, 0.42);
-  const length = side < 0.5 ? 'short' : side < 0.9 ? 'medium' : 'long';
+  const length = side < 0.5 ? 'short' : side < 1.25 ? 'medium' : 'long';
 
   const smile = g.smile ?? 0.5;
-  const squint = (g.eyeOpen ?? 0.3) < 0.265 && smile > 0.6;
+  const squint = (g.eyeOpen ?? 0.3) < 0.215 && smile > 0.6;
   const irisL = c.iris ? hexLum(c.iris) : 0;
   const irisHsl = {};
-  if (c.iris) new THREE.Color(c.iris).getHSL(irisHsl);
-  // light eyes: noticeably bright iris, or a clearly blue/green one
-  const lightEyes = !!c.iris && (irisL > 0.06 || (irisHsl.s > 0.18 && irisHsl.h > 0.2 && irisHsl.h < 0.7 && irisL > 0.025));
+  if (c.iris) new THREE.Color(fix(c.iris)).getHSL(irisHsl, THREE.SRGBColorSpace);
+  // light eyes = blue / green / grey, not merely bright brown
+  const lightEyes = !!c.iris && irisHsl.l > 0.2 && ((irisHsl.h > 0.15 && irisHsl.h < 0.75 && irisHsl.s > 0.06) || irisHsl.s < 0.06);
 
   const beardAmt = t.beard ? clamp((0.92 - Math.min(t.beard.chinSat ?? 1, t.beard.lipSat ?? 1)) / 0.15, 0, 1) : 0;
   const glassesOn = !!t.glasses && ((t.glasses.seg ?? 0) > 0.03 || (t.glasses.score ?? 0) > 0.95);
 
-  const skin = tidy(c.skin || '#e8b99a', { lift: 0.06, sat: 0.88, minL: 0.25, maxL: 0.86 });
-  const hairCol = tidy(c.hair || c.brow || '#3a2a20', { lift: -0.03, sat: 1.1, minL: 0.06, maxL: 0.8 });
+  const skin = tidy(fix(c.skinBright || c.skin) || '#e8b99a', { lift: 0.04, sat: 0.9, minL: 0.25, maxL: 0.9 });
+  const rawHair = fix(c.hair || c.brow) || '#3a2a20';
+  const hh = {};
+  new THREE.Color(rawHair).getHSL(hh, THREE.SRGBColorSpace);
+  const grey = hh.s < 0.16 && hh.l > 0.5;
+  const light = !grey && hh.l > 0.45;
+  const hairCol = grey ? tidy(rawHair, { lift: 0.02, sat: 0.3, maxL: 0.8 })
+    : light ? tidy(rawHair, { lift: 0.06, sat: 1.35, maxL: 0.75 })
+    : tidy(rawHair, { lift: -0.04, sat: 1.1, minL: 0.06, maxL: 0.8 });
   return {
     name,
     kid,
     skin,
     hair: hairCol,
     brow: mix(tidy(c.brow || c.hair || '#3a2a20', { lift: -0.02, sat: 1.1 }), hairCol, 0.4),
-    eye: lightEyes ? tidy(c.iris, { lift: 0.02, sat: 1.8 }) : '#2a2230',
+    eye: lightEyes ? tidy(fix(c.iris), { lift: 0.08, sat: 2.2, maxL: 0.6 }) : tidy(fix(c.iris || '#3a2a22'), { lift: 0, sat: 1.4, minL: 0.1, maxL: 0.24 }),
     lightEyes,
     lip: c.lip || '#d98b8f',
-    shirt: c.shirt ? tidy(c.shirt, { lift: 0.08, sat: 1.25, minL: 0.15, maxL: 0.85 }) : SHIRTS[Math.floor(r() * SHIRTS.length)],
+    shirt: c.shirt ? tidy(fix(c.shirt), { lift: 0.08, sat: 1.25, minL: 0.15, maxL: 0.85 }) : SHIRTS[Math.floor(r() * SHIRTS.length)],
     pants: PANTS[Math.floor(r() * PANTS.length)],
     shoes: SHOES[Math.floor(r() * SHOES.length)],
     // head shape (caricatured around population means)
-    sx: 1.13,
-    sy: clamp(0.96 + ((g.faceH ?? 1.2) - 1.2) * 1.3, 0.84, 1.1),
-    jaw: clamp(0.5 + ((g.jaw ?? 0.81) - 0.81) / 0.06, 0, 1),
-    eyeScale: clamp(1 + ((g.eyeW ?? 0.19) - 0.19) / 0.02 * 0.12, 0.8, 1.25) * (kid ? 1.15 : 1),
-    eyeOpen: clamp(0.85 + ((g.eyeOpen ?? 0.3) - 0.28) * 2.5, 0.75, 1.2),
+    sx: clamp(1.13 - ((g.faceH ?? 1.2) - 1.2) * 0.9, 1.02, 1.26),
+    sy: clamp(0.96 + ((g.faceH ?? 1.2) - 1.2) * 1.5, 0.84, 1.12),
+    jaw: clamp(0.5 + ((g.jaw ?? 0.81) - 0.81) / 0.04, 0, 1),
+    eyeScale: clamp(1 + ((g.eyeW ?? 0.19) - 0.19) / 0.02 * 0.18, 0.78, 1.25) * (kid ? 1.15 : 1),
+    eyeOpen: clamp(0.88 + ((g.eyeOpen ?? 0.3) - 0.3) * 4, 0.62, 1.2),
     eyeGap: clamp(0.36 + ((g.eyeGap ?? 0.24) - 0.24) * 1.6, 0.3, 0.44),
     squint,
-    browThick: clamp(0.8 + (c.skin && c.brow ? (hexLum(c.skin) - hexLum(c.brow)) / Math.max(0.05, hexLum(c.skin)) : 0.5) * 0.6, 0.7, 1.4),
+    smileSquash: smile > 0.6 && !squint ? clamp(1 - (smile - 0.6) * 0.6, 0.78, 1) : 1,
+    browThick: clamp(0.65 + (c.skin && c.brow ? (hexLum(c.skin) - hexLum(c.brow)) / Math.max(0.05, hexLum(c.skin)) : 0.5) * 0.7, 0.65, 1.3),
     browTilt: clamp((g.browTilt ?? 0) * 3, -0.35, 0.35),
     mouthW: clamp(1 + ((g.mouthW ?? 0.42) - 0.42) / 0.05 * 0.15, 0.75, 1.35),
-    mouth: smile > 0.7 || (g.open ?? 0) > 0.25 ? 'grin' : smile > 0.3 ? 'smile' : 'neutral',
+    mouth: smile > 0.7 || (g.open ?? 0) > 0.25 ? 'grin' : smile > 0.35 ? 'smile' : 'neutral',
     nose: clamp(1 + ((g.noseW ?? 0.27) - 0.27) * 3, 0.8, 1.3),
     // hair
     hairLength: length,
@@ -103,10 +121,16 @@ export function traitsToParams(t, name = '') {
     bangs: (H.bangs ?? 0) > 0.25,
     volume: clamp(((H.width ?? 0.72) - 0.7) * 2.2, 0, 0.6),
     recede: (H.recede ?? 0) > 0.55 ? clamp(((H.recede ?? 0) - 0.5) * 6, 0.3, 1) : 0,
-    part: r() < 0.5 ? -1 : 1,
+    part: (H.fringeSide ?? 0) > 0.08 ? -1 : (H.fringeSide ?? 0) < -0.08 ? 1 : r() < 0.5 ? -1 : 1,
+    messy: clamp(((H.texture ?? 0.4) - 0.35) * 3, 0, 1),
+    curly: (H.texture ?? 0) > 0.54,
+    brows: t.brows || null,
     tuft: false,
     headwear: (H.headwear ?? 0) > 0.15 ? tidy(c.headwear || '#c0392b', { sat: 1.3 }) : null,
-    glasses: glassesOn ? tidy(c.glasses || '#222222', { lift: -0.04, sat: 1.3, maxL: 0.45 }) : null,
+    glasses: glassesOn ? tidy(c.glasses || '#222222', { lift: -0.02, sat: 1.2, maxL: 0.45 }) : null,
+    glassesSize: clamp((t.glasses?.h || 0.23) / 0.23, 0.8, 1.3),
+    glassesThick: clamp(0.6 + (t.glasses?.seg ?? 0.1) * 4, 0.7, 1.6),
+    earrings: (t.earrings ?? 0) > 0.02,
     tint: glassesOn && (t.glasses.lens ?? 1) < 0.28,
     beard: beardAmt > 0.3 ? beardAmt : 0,
     blush: 0.55 + r() * 0.2,
@@ -293,8 +317,26 @@ function buildHair(P, F, grp) {
     volume: P.volume, recede: P.recede, rf,
   };
   for (const g of hairShell(P, F, spec)) grp.add(mesh(g, hm));
+  if (P.curly) {
+    const cr = rng(hashStr((P.name || '') + 'curl'));
+    const n = len === 'short' ? 70 : 110;
+    for (let i = 0; i < n; i++) {
+      const phi = cr() * Math.PI * 2, c = Math.cos(phi);
+      const wf = Math.max(c, 0), wb = Math.max(-c, 0);
+      const maxTh = len === 'short' ? 1.2 + wb * 0.5 : 1.0 + (1 - wf) * 0.9;
+      const th = Math.acos(1 - cr() * (1 - Math.cos(Math.min(maxTh, 1.75))));
+      const b = mesh(SPHERE(), hm);
+      b.scale.setScalar(0.1 + cr() * 0.07);
+      b.position.copy(F.hp(th, phi, rf(th, phi) + 0.02));
+      grp.add(b);
+    }
+  }
 
-  const lock = (pts, r0, o) => grp.add(mesh(lockGeo(pts, r0, o), hm));
+  const jr = rng(hashStr(P.name || 'x'));
+  const lock = (pts, r0, o) => {
+    if (P.messy) pts = pts.map((p, i) => (i ? p.clone().add(V(jr() - 0.5, jr() - 0.5, jr() - 0.5).multiplyScalar(0.12 * P.messy)) : p));
+    grp.add(mesh(lockGeo(pts, r0 * (1 + (P.messy ? (jr() - 0.5) * 0.3 : 0)), o), hm));
+  };
   const at = (th, phi, k = 1) => F.hp(th, phi, rf(th, phi) * k);
   const part = P.part;
 
@@ -376,6 +418,28 @@ function buildHair(P, F, grp) {
   }
 }
 
+function stubbleTex(col, density) {
+  const key = 'stub|' + col + density.toFixed(2);
+  if (texCache.has(key)) return texCache.get(key);
+  const cv = document.createElement('canvas');
+  cv.width = 512; cv.height = 128;
+  const g = cv.getContext('2d');
+  const r = rng(7);
+  g.fillStyle = col;
+  for (let i = 0; i < 1400 * density; i++) {
+    const x = r() * 512, y = r() * 128;
+    // fade out toward the cheeks (top of the shell) and the shell's sides
+    const fade = Math.min(1, (y / 128) * 2.2) * Math.min(1, Math.min(x, 512 - x) / 90);
+    if (r() > fade) continue;
+    g.globalAlpha = 0.35 + r() * 0.4;
+    g.beginPath(); g.arc(x, y, 1.6 + r() * 1.4, 0, Math.PI * 2); g.fill();
+  }
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  texCache.set(key, t);
+  return t;
+}
+
 // ---------------------------------------------------------------- face
 function buildFace(P, F, grp) {
   const skinM = soft(P.skin);
@@ -384,7 +448,7 @@ function buildFace(P, F, grp) {
   const darkM = soft('#2a2230', { rough: 0.15, rim: 0.05 });
   const eyes = [];
   const pitchEye = -0.2;
-  const ex = 0.13 * P.eyeScale, ey = 0.17 * P.eyeScale * P.eyeOpen;
+  const ex = 0.13 * P.eyeScale, ey = 0.17 * P.eyeScale * P.eyeOpen * (P.smileSquash ?? 1);
   const gap = P.eyeGap + 0.04;
 
   for (const sd of [-1, 1]) {
@@ -397,12 +461,12 @@ function buildFace(P, F, grp) {
       arc.position.y = -0.04;
       g.add(arc);
     } else {
-      const e = mesh(SPHERE(), P.lightEyes ? eyeM : darkM);
+      const e = mesh(SPHERE(), eyeM);
       e.scale.set(ex, ey, 0.05);
       g.add(e);
-      if (P.lightEyes) {
-        const pu = mesh(SPHERE(), darkM);
-        pu.scale.set(ex * 0.55, ey * 0.6, 0.04);
+      {
+        const pu = mesh(SPHERE(), basic('#140f16'));
+        pu.scale.set(ex * (P.lightEyes ? 0.5 : 0.62), ey * (P.lightEyes ? 0.55 : 0.66), 0.04);
         pu.position.set(0, -ey * 0.05, 0.02);
         g.add(pu);
       }
@@ -418,6 +482,20 @@ function buildFace(P, F, grp) {
     grp.add(g);
     eyes.push(g);
 
+    const real = P.brows && P.brows.find((b) => b.u === sd);
+    if (real) {
+      // brow traced from the photo's landmarks, exaggerated a little
+      const pts = real.pts;
+      const mu = pts.reduce((a, p) => a + p[0], 0) / pts.length, mv = pts.reduce((a, p) => a + p[1], 0) / pts.length;
+      const thick = pts.reduce((a, p) => a + p[2], 0) / pts.length;
+      const yaw0 = yaw + sd * 0.02 + mu * 0.6, pitch0 = pitchEye + ey + 0.12 + (-mv - 0.12) * 1.0;
+      // shape from the photo, but keep the inner end from dipping (reads as angry)
+      const inner = pts[0][1];
+      const curve = pts.map((p, i) => F.surface(yaw0 + (p[0] - mu) * 1.6,
+        pitch0 - (p[1] - mv) * 1.3 + (i === 0 ? Math.max(0, inner - mv) * 0.9 : i === 1 ? Math.max(0, inner - mv) * 0.4 : 0), 0.018).p);
+      const r0 = clamp(0.016 + (thick - 0.035) * 0.5, 0.013, 0.034) * P.browThick;
+      grp.add(mesh(lockGeo(curve, r0, { flat: 0.5, tip: r0 * 0.45, belly: 0.1 }), soft(P.brow, { rim: 0.05 })));
+    } else {
     // brow: short rounded dash
     const bg = new THREE.Group();
     place(bg, F.surface(yaw + sd * 0.03, pitchEye + ey + 0.13, 0.012));
@@ -426,6 +504,7 @@ function buildFace(P, F, grp) {
     b.scale.set(P.browThick, 1, 0.5);
     bg.add(b);
     grp.add(bg);
+    }
 
     // cheek blush: soft gradient disc
     const bl = mesh(cached('blushq', () => new THREE.PlaneGeometry(1, 1)),
@@ -448,17 +527,31 @@ function buildFace(P, F, grp) {
 
   // mouth
   const m = new THREE.Group();
-  place(m, F.surface(0, pitchEye - 0.31, P.beard ? 0.025 : 0.006));
+  place(m, F.surface(0, pitchEye - (P.mouth === 'grin' ? 0.29 : 0.31), P.beard ? 0.025 : 0.006));
   const mouthM = soft('#8c2f3f', { rough: 0.5, rim: 0 });
   if (P.mouth === 'grin') {
-    const r = 0.085 * P.mouthW;
+    const r = 0.13 * P.mouthW;
     const d = mesh(cached('grin', () => new THREE.CircleGeometry(1, 28, Math.PI, Math.PI)), mouthM);
-    d.scale.set(r, r * 0.95, 1);
+    d.scale.set(r, r * 0.85, 1);
+    // top row of teeth: a flat half-ellipse tucked under the mouth's straight edge
+    const teeth = mesh(cached('grin', () => new THREE.CircleGeometry(1, 28, Math.PI, Math.PI)), basic('#fffaf2'));
+    teeth.scale.set(r * 0.9, r * 0.28, 1);
+    teeth.position.set(0, -0.004, 0.001);
+    m.add(teeth);
     const tongue = mesh(cached('tongue', () => new THREE.CircleGeometry(1, 20)), soft('#f2848f', { rim: 0 }));
     tongue.scale.set(r * 0.5, r * 0.32, 1);
-    tongue.position.set(0, -r * 0.62, 0.002);
+    tongue.position.set(0, -r * 0.55, 0.002);
     m.add(d, tongue);
   } else {
+    if (P.mouth === 'neutral') {
+      const line = mesh(cached('flat', () => new THREE.TorusGeometry(0.3, 0.014, 8, 16, 0.32)), mouthM);
+      line.rotation.z = Math.PI * 1.5 - 0.16;
+      line.position.y = 0.29;
+      line.scale.x = P.mouthW;
+      m.add(line);
+      grp.add(m);
+      return finishFace();
+    }
     // a small ":3"-ish smile made of two short arcs
     const arcM = mouthM;
     const w = P.mouth === 'smile' ? 1 : 0.8;
@@ -471,8 +564,10 @@ function buildFace(P, F, grp) {
     }
   }
   grp.add(m);
+  return finishFace();
 
-  // stubble: translucent shell over the lower face
+  function finishFace() {
+  // stubble: dotted shell over the jaw
   if (P.beard) {
     const g = cached('beardshell', () => new THREE.SphereGeometry(1, 40, 16, Math.PI / 2 - 1.05, 2.1, 2.2, 0.85)).clone();
     const pos = g.attributes.position;
@@ -490,17 +585,17 @@ function buildFace(P, F, grp) {
 
   if (P.glasses) {
     const frameM = soft(P.glasses, { rough: 0.3, rim: 0.15 });
-    const R = Math.max(ex, ey) * 1.25;
+    const R = Math.max(ex, ey) * 1.2 * P.glassesSize;
     const centers = [];
     for (const sd of [-1, 1]) {
       const s = F.surface(sd * gap, pitchEye, 0.08);
-      const ring = mesh(cached('frame', () => {
+      const ring = mesh(cached('frame' + P.glassesThick.toFixed(1), () => {
         const pts = [];
         for (let k = 0; k < 48; k++) {
           const a = (k / 48) * Math.PI * 2, c = Math.cos(a), s2 = Math.sin(a);
           pts.push(V(Math.sign(c) * Math.pow(Math.abs(c), 0.6) * 1.1, Math.sign(s2) * Math.pow(Math.abs(s2), 0.6) * 0.86, 0));
         }
-        return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, true), 64, 0.1, 8, true);
+        return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, true), 64, 0.075 * P.glassesThick, 8, true);
       }), frameM);
       ring.scale.setScalar(R);
       place(ring, s);
@@ -525,7 +620,17 @@ function buildFace(P, F, grp) {
     rod(L.s.p.clone().add(V(R * 1.08, R * 0.3, 0)), Rr.s.p.clone().add(V(-R * 1.08, R * 0.3, 0)), 0.018);
     for (const { s, sd } of centers) rod(s.p.clone().add(V(sd * R * 1.12, R * 0.3, -0.02)), F.surface(sd * 1.42, pitchEye + 0.05, 0.05).p, 0.016);
   }
+  if (P.earrings) {
+    const gold = soft('#f2c14e', { rough: 0.25, rim: 0.3 });
+    for (const sd of [-1, 1]) {
+      const hoop = mesh(cached('hoop', () => new THREE.TorusGeometry(0.075, 0.016, 8, 24)), gold);
+      hoop.position.copy(F.surface(sd * 1.45, pitchEye - 0.32, 0.02).p);
+      hoop.rotation.y = Math.PI / 2;
+      grp.add(hoop);
+    }
+  }
   return { eyes };
+  }
 }
 
 // ---------------------------------------------------------------- body
@@ -663,6 +768,7 @@ export function buildAvatar(P) {
   buildHair(P, F, head);
 
   const st = { phase: Math.random() * 10, blinkAt: 1 + Math.random() * 4, blink: 0, hop: 0, wave: 0, walk: 0 };
+  root.userData.headCenterY = head.position.y * P.height;
   root.userData.headTopY = (head.position.y + (P.sy * 1.25 + (P.headwear ? 0.1 : 0) + P.volume * 0.2 + (P.kid ? 0.3 : 0)) * headScale) * P.height;
 
   function update(t, dt, opts = {}) {

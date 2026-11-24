@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/CSS2DRenderer.js';
 import { traitsToParams, buildAvatar, blobShadowMaterial } from './avatar.js';
+import { traitLabels } from './labels.js';
 
 const qs = new URLSearchParams(location.search);
 const $ = (s) => document.querySelector(s);
@@ -196,11 +197,6 @@ labels.domElement.addEventListener('pointerup', (e) => {
   if (i >= 0) select(i); else closePanel();
 });
 
-const TRAIT_LABELS = (p) => [
-  p.hairLength + ' hair', p.bangs && 'bangs', p.recede && 'receding', p.volume > 0.2 && 'big hair',
-  p.glasses && (p.tint ? 'tinted glasses' : 'glasses'), p.beard && 'stubble', p.headwear && 'headband',
-  p.squint ? 'happy eyes' : p.lightEyes && 'light eyes', p.mouth === 'grin' ? 'big smile' : p.mouth === 'smile' ? 'smile' : 'calm', p.kid && 'kid',
-].filter(Boolean);
 
 function select(i) {
   const c = crowd[i];
@@ -212,8 +208,9 @@ function select(i) {
     ${c.person.image ? `<img src="${c.person.image}" alt="">` : ''}
     <h2>${escapeHtml(c.person.name)}</h2>
     <div class="sw">${sw(c.params.skin)}${sw(c.params.hair)}${sw(c.params.shirt)}${c.params.glasses ? sw(c.params.glasses) : ''}</div>
-    <div class="chips">${TRAIT_LABELS(c.params).map((t) => `<span>${t}</span>`).join('')}</div>
-    ${c.traits ? '' : '<p class="muted">No traits read from a photo; this one is random.</p>'}`;
+    <div class="chips">${traitLabels(c.params).map((t) => `<span>${t}</span>`).join('')}</div>
+    ${c.traits ? '' : '<p class="muted">No traits read from a photo; this one is random.</p>'}
+    <p class="muted"><a href="compare.html${qs.get('src') ? '?src=' + encodeURIComponent(qs.get('src')) : ''}#${encodeURIComponent(c.person.name)}">See everyone side by side →</a></p>`;
   $('#panel').classList.add('open');
   $('#panel .x').onclick = closePanel;
 }

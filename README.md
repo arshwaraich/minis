@@ -26,8 +26,8 @@ are read in the viewer's browser (downloads ~20 MB of models), so bake them firs
 `override` takes any param from `traitsToParams` (e.g. `{"hairLength":"long","glasses":"#222"}`)
 to fix a misread.
 
-Dev: `web/lineup.html?view=head|front|side` renders each avatar above its photo;
-`tools/lineup.mjs`, `tools/shot.mjs`, `tools/debug_masks.mjs` screenshot/debug in headless Chromium
+Dev: `web/compare.html` shows each photo next to its avatar (also linked from the island panel);
+`tools/lineup.mjs` (screenshots compare.html), `tools/shot.mjs`, `tools/debug_masks.mjs` screenshot/debug in headless Chromium
 (headless can't capture WebGPU canvases; use `?gl=1` for screenshots).
 
 Test faces in web/people/ are AI-generated (thispersondoesnotexist.com); not real people.
