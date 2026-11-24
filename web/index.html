@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Minis</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='42' r='34' fill='%23f2c6a8'/><circle cx='38' cy='46' r='6' fill='%232a2230'/><circle cx='62' cy='46' r='6' fill='%232a2230'/><path d='M16 38a34 34 0 0 1 68 0q-20-14-34-8q-14-6-34 8z' fill='%234a3226'/></svg>">
+<script type="importmap">
+{ "imports": {
+  "three": "./vendor/three/three.webgpu.min.js",
+  "three/webgpu": "./vendor/three/three.webgpu.min.js",
+  "three/tsl": "./vendor/three/three.tsl.min.js",
+  "three/addons/": "./vendor/three/addons/"
+} }
+</script>
+<style>
+  :root { --ink: #2b2a33; --card: #fffdf8; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: linear-gradient(#9fdcf5 0%, #c9ecf7 55%, #e9f7f2 100%); font: 15px/1.35 ui-rounded, "SF Pro Rounded", system-ui, sans-serif; color: var(--ink); -webkit-tap-highlight-color: transparent; }
+  #stage, #stage canvas, .labels { position: fixed; inset: 0; }
+  .labels { touch-action: none; }
+  .label { pointer-events: auto; cursor: pointer; background: var(--card); padding: 3px 10px; border-radius: 999px; font-weight: 700; font-size: 13px; box-shadow: 0 2px 0 rgba(0,0,0,.12); white-space: nowrap; transition: transform .15s; }
+  .label.hot { transform: scale(1.15); background: #ffe8a3; }
+  header { position: fixed; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: 8px; padding: max(12px, env(safe-area-inset-top)) 14px 0; pointer-events: none; }
+  header > * { pointer-events: auto; }
+  h1 { margin: 0; font-size: 20px; letter-spacing: .3px; }
+  .pill { background: var(--card); border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 700; box-shadow: 0 2px 0 rgba(0,0,0,.1); }
+  .grow { flex: 1; }
+  button { font: inherit; font-weight: 700; border: 0; border-radius: 999px; padding: 8px 14px; background: #ff8f6b; color: #fff; box-shadow: 0 3px 0 #d96c49; cursor: pointer; }
+  button:active { transform: translateY(2px); box-shadow: 0 1px 0 #d96c49; }
+  #panel { position: fixed; right: 14px; top: 64px; width: 260px; max-width: calc(100vw - 28px); background: var(--card); border-radius: 22px; padding: 14px; box-shadow: 0 6px 0 rgba(0,0,0,.08), 0 10px 30px rgba(0,0,0,.12); transform: translateY(-10px); opacity: 0; pointer-events: none; transition: .2s; }
+  #panel.open { transform: none; opacity: 1; pointer-events: auto; }
+  #panel img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 14px; display: block; }
+  #panel h2 { margin: 10px 0 6px; font-size: 18px; }
+  #panel .x { position: absolute; top: 6px; right: 6px; width: 32px; height: 32px; padding: 0; background: var(--card); color: var(--ink); box-shadow: none; font-size: 20px; }
+  .sw { display: flex; gap: 6px; margin-bottom: 8px; }
+  .sw i { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.12); }
+  .chips { display: flex; flex-wrap: wrap; gap: 5px; }
+  .chips span { background: #eef6e6; border-radius: 999px; padding: 2px 9px; font-size: 12px; font-weight: 600; }
+  .muted { color: #7a7884; font-size: 13px; margin: 8px 0 0; }
+  #toast { position: fixed; left: 50%; bottom: max(18px, env(safe-area-inset-bottom)); transform: translate(-50%, 20px); opacity: 0; background: var(--ink); color: #fff; padding: 8px 14px; border-radius: 999px; font-size: 13px; font-weight: 600; transition: .2s; pointer-events: none; max-width: calc(100vw - 28px); text-align: center; }
+  #toast.on { opacity: 1; transform: translate(-50%, 0); }
+  dialog { border: 0; border-radius: 22px; padding: 18px; width: min(340px, calc(100vw - 28px)); background: var(--card); color: var(--ink); }
+  dialog::backdrop { background: rgba(40,50,60,.35); }
+  dialog h3 { margin: 0 0 10px; }
+  dialog label { display: block; font-size: 13px; font-weight: 700; margin: 10px 0 4px; }
+  dialog input { width: 100%; font: inherit; padding: 8px 10px; border-radius: 12px; border: 2px solid #e6e1d8; background: #fff; }
+  dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+  dialog .ghost { background: transparent; color: var(--ink); box-shadow: none; }
+  .hint { font-size: 12px; color: #7a7884; margin: 6px 0 0; }
+  @media (max-width: 520px) {
+    #panel { top: auto; bottom: 12px; right: 14px; display: grid; grid-template-columns: 96px 1fr; gap: 0 12px; align-items: start; }
+    #panel img { grid-row: span 3; }
+    #panel h2 { margin: 2px 0 4px; }
+    h1 { font-size: 18px; }
+  }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<header>
+  <h1>Minis</h1>
+  <span class="pill"><span id="count">0</span> folks</span>
+  <span class="pill" id="backend">…</span>
+  <span class="grow"></span>
+  <button id="addBtn">+ Add</button>
+</header>
+<aside id="panel"></aside>
+<div id="toast"></div>
+<dialog id="addDlg">
+  <form id="addForm">
+    <h3>Add someone</h3>
+    <label for="addName">Name</label>
+    <input id="addName" maxlength="40" placeholder="Their name" required>
+    <label for="addFile">Photo</label>
+    <input id="addFile" type="file" accept="image/*">
+    <label for="addUrl">…or image URL</label>
+    <input id="addUrl" type="url" placeholder="https://…">
+    <p class="hint">A clear, front-facing face works best. The photo is read on this device, not uploaded.</p>
+    <div class="row">
+      <button type="button" class="ghost" id="resetAdded" title="Remove people you added on this device">Clear mine</button>
+      <button type="button" class="ghost" onclick="this.closest('dialog').close()">Cancel</button>
+      <button>Make</button>
+    </div>
+  </form>
+</dialog>
+<script type="module" src="main.js"></script>
+</body>
+</html>
