@@ -3,6 +3,7 @@ import { OrbitControls } from 'three/addons/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/CSS2DRenderer.js';
 import { traitsToParams, buildAvatar, blobShadowMaterial } from './avatar.js';
 import { traitLabels } from './labels.js';
+import { paint } from './style.js';
 
 const qs = new URLSearchParams(location.search);
 const $ = (s) => document.querySelector(s);
@@ -12,8 +13,7 @@ const LOCAL_KEY = 'minis.added.v1';
 const renderer = new THREE.WebGPURenderer({ antialias: true, alpha: true, forceWebGL: qs.has('gl') });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
-renderer.toneMapping = THREE.NeutralToneMapping;
-renderer.toneMappingExposure = 1.0;
+renderer.toneMapping = THREE.NoToneMapping;
 $('#stage').appendChild(renderer.domElement);
 await renderer.init();
 $('#backend').textContent = renderer.backend.isWebGPUBackend ? 'WebGPU' : 'WebGL 2';
@@ -43,22 +43,22 @@ const island = new THREE.Group();
 scene.add(island);
 function buildIsland(R) {
   island.clear();
-  const M = (c, r = 0.9) => new THREE.MeshStandardMaterial({ color: c, roughness: r });
+  const M = (c, kind = 'ground') => paint(c, kind, { rim: 0.08 });
   // water, sand rim, grass plateau with a soft bevel
-  const water = new THREE.Mesh(new THREE.CircleGeometry(R * 30, 64), M('#8fd9e0', 0.4));
+  const water = new THREE.Mesh(new THREE.CircleGeometry(R * 30, 64), M('#93d8dc'));
   water.rotation.x = -Math.PI / 2;
   water.position.y = -0.9;
-  const sand = new THREE.Mesh(new THREE.CylinderGeometry(R + 0.9, R + 1.6, 0.8, 72), M('#f3e2b8', 1));
+  const sand = new THREE.Mesh(new THREE.CylinderGeometry(R + 0.9, R + 1.6, 0.8, 72), M('#f5e3b5'));
   sand.position.y = -1.0;
-  const cliff = new THREE.Mesh(new THREE.CylinderGeometry(R * 0.99, R * 1.02, 0.7, 72), M('#d9b48a', 1));
+  const cliff = new THREE.Mesh(new THREE.CylinderGeometry(R * 0.99, R * 1.02, 0.7, 72), M('#dcb48c', 'wood'));
   cliff.position.y = -0.5;
-  const grass = new THREE.Mesh(new THREE.CylinderGeometry(R, R, 0.16, 72), M('#9ad66f', 0.95));
+  const grass = new THREE.Mesh(new THREE.CylinderGeometry(R, R, 0.16, 72), M('#a2d873'));
   grass.position.y = -0.08;
-  const bevel = new THREE.Mesh(new THREE.TorusGeometry(R, 0.08, 8, 96), M('#9ad66f', 0.95));
+  const bevel = new THREE.Mesh(new THREE.TorusGeometry(R, 0.08, 8, 96), M('#a2d873'));
   bevel.rotation.x = Math.PI / 2;
   island.add(water, sand, cliff, grass, bevel);
   // darker grass patches
-  const patchM = M('#8bcb62', 1);
+  const patchM = M('#93cf68');
   const rnd = mulberry(7);
   for (let i = 0; i < R * 2; i++) {
     const a = rnd() * Math.PI * 2, r = Math.sqrt(rnd()) * (R - 1.2);
@@ -69,7 +69,7 @@ function buildIsland(R) {
     island.add(p);
   }
   // round fruit-trees on the far side so the default view stays clear
-  const trunkM = M('#9b6a45'), leafMs = ['#4fb06a', '#62bf72', '#3fa060'].map((c) => M(c, 0.85)), fruitM = M('#f06a5a', 0.5);
+  const trunkM = M('#a8774f', 'wood'), leafMs = ['#5cbd72', '#6fc87a', '#4dae69'].map((c) => M(c, 'default')), fruitM = M('#f27461', 'default');
   const shadowM = blobShadowMaterial();
   const trees = Math.round(R * 0.9);
   for (let i = 0; i < trees; i++) {
@@ -99,8 +99,8 @@ function buildIsland(R) {
     island.add(t);
   }
   // flowers: five petals around a yellow centre
-  const petalMs = ['#ffffff', '#ffb3c7', '#ffd95e', '#c7b3ff', '#ff8f8f'].map((c) => M(c, 0.7));
-  const centreM = M('#ffd34d', 0.6);
+  const petalMs = ['#ffffff', '#ffb3c7', '#ffd95e', '#c7b3ff', '#ff8f8f'].map((c) => M(c, 'default'));
+  const centreM = M('#ffd34d', 'default');
   const pg = new THREE.SphereGeometry(0.06, 8, 6), cg = new THREE.SphereGeometry(0.045, 8, 6);
   for (let i = 0; i < R * 5; i++) {
     const a = rnd() * Math.PI * 2, r = Math.sqrt(rnd()) * (R - 0.5);

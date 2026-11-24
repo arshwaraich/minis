@@ -14,6 +14,7 @@
   .imgs img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 14px; display: block; background: #e9f4f8; }
   .name { font-weight: 800; margin: 8px 4px 4px; }
   .chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 2px; }
+  body.hero #g { grid-template-columns: repeat(auto-fill, minmax(560px, 1fr)); }
   .chips span { background: #eef6e6; border-radius: 999px; padding: 1px 8px; font-size: 12px; font-weight: 600; }
 </style>
 <header><h1>Side by side</h1><a href="./">← island</a></header>
@@ -25,16 +26,19 @@ import { traitLabels } from './labels.js';
 const list = await (await fetch(new URLSearchParams(location.search).get('src') || 'people.json')).json();
 const renderer = new THREE.WebGPURenderer({ antialias: true, alpha: true, forceWebGL: true });
 await renderer.init();
-const S = 520;
+const QS = new URLSearchParams(location.search);
+const S = +(QS.get('size') || 520);
+if (QS.get('only')) document.body.classList.add('hero');
 renderer.setSize(S, S);
-renderer.toneMapping = THREE.NeutralToneMapping;
+renderer.toneMapping = THREE.NoToneMapping;
 const scene = new THREE.Scene();
 scene.background = new THREE.Color('#e3f2f6');
 scene.add(new THREE.HemisphereLight('#fffdf5', '#f3dcc0', 2.0));
 const sun = new THREE.DirectionalLight('#fff1dc', 1.5); sun.position.set(3, 6, 6); scene.add(sun);
 // frame head + shoulders like a portrait photo
 const cam = new THREE.PerspectiveCamera(24, 1, 0.1, 50);
-for (const p of (Array.isArray(list) ? list : list.people)) {
+const only = QS.get('only') ? QS.get('only').split(',') : null;
+for (const p of (Array.isArray(list) ? list : list.people).filter((p) => !only || only.includes(p.name))) {
   const P = { ...traitsToParams(p.traits || {}, p.name), ...(p.override || {}) };
   const av = buildAvatar(P);
   av.update(0, 0.016, {});

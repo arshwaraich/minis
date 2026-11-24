@@ -10,7 +10,10 @@ Cute chibi island folks generated from photos.
    around the eyes), headwear, stubble (chin/upper-lip saturation vs cheeks).
 2. **avatar.js**: `traitsToParams` caricatures those around population means; `buildAvatar` builds a
    procedural character (deformed head, swept hair shell + tapered hair locks, glossy eyes, blush,
-   glasses, headband, patterned tee) with TSL rim-light materials. No art assets.
+   glasses, headband, patterned tee). The face is 2D artwork drawn on a canvas and wrapped onto the head
+   in yaw/pitch space; hair carries painted strand lines. Every surface (characters + island) uses one
+   stylised unlit shader in **style.js** (tinted shadows, soft light band, rim, hair highlight ring),
+   so the look is art-directed and identical on WebGPU and WebGL 2. No art assets.
 3. **main.js**: three.js `WebGPURenderer` (falls back to WebGL 2; force with `?gl=1`), island scene,
    wandering/idle animation, CSS2D name labels, click for photo + traits, "+ Add" to make one from a
    local photo or image URL (stored in localStorage on that device only).
@@ -26,7 +29,7 @@ are read in the viewer's browser (downloads ~20 MB of models), so bake them firs
 `override` takes any param from `traitsToParams` (e.g. `{"hairLength":"long","glasses":"#222"}`)
 to fix a misread.
 
-Dev: `web/compare.html` shows each photo next to its avatar (also linked from the island panel);
+Dev: `web/compare.html?size=900&only=Name1,Name2` for large closeups. `web/compare.html` shows each photo next to its avatar (also linked from the island panel);
 `tools/lineup.mjs` (screenshots compare.html), `tools/shot.mjs`, `tools/debug_masks.mjs` screenshot/debug in headless Chromium
 (headless can't capture WebGPU canvases; use `?gl=1` for screenshots).
 
