@@ -26,6 +26,9 @@
   h1 { margin: 0; font-size: 20px; letter-spacing: .3px; }
   .pill { background: var(--card); border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 700; box-shadow: 0 2px 0 rgba(0,0,0,.1); }
   .grow { flex: 1; }
+  select.pill { border: 0; font: inherit; font-size: 12px; font-weight: 700; color: var(--ink); }
+  .pill, button { white-space: nowrap; }
+  @media (max-width: 520px) { #backend, #stylesLink { display: none; } header { gap: 6px; } button#addBtn { padding: 7px 11px; } }
   button { font: inherit; font-weight: 700; border: 0; border-radius: 999px; padding: 8px 14px; background: #ff8f6b; color: #fff; box-shadow: 0 3px 0 #d96c49; cursor: pointer; }
   button:active { transform: translateY(2px); box-shadow: 0 1px 0 #d96c49; }
   #panel { position: fixed; right: 14px; top: 64px; width: 260px; max-width: calc(100vw - 28px); background: var(--card); border-radius: 22px; padding: 14px; box-shadow: 0 6px 0 rgba(0,0,0,.08), 0 10px 30px rgba(0,0,0,.12); transform: translateY(-10px); opacity: 0; pointer-events: none; transition: .2s; }
@@ -63,6 +66,8 @@
   <span class="pill"><span id="count">0</span> folks</span>
   <span class="pill" id="backend">…</span>
   <span class="grow"></span>
+  <select id="styleSel" class="pill" aria-label="Art style"></select>
+  <a class="pill" id="stylesLink" href="styles.html" style="text-decoration:none;color:inherit">Styles</a>
   <button id="addBtn">+ Add</button>
 </header>
 <aside id="panel"></aside>

@@ -3,7 +3,7 @@ const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 const [url, out] = process.argv.slice(2);
 const b = await chromium.launch();
-const p = await b.newPage({ viewport: { width: 1200, height: 700 } });
+const p = await b.newPage({ viewport: { width: 1400, height: 900 } });
 p.on('pageerror', (e) => console.error('[pageerror]', e.message));
 await p.goto(url);
 await p.waitForSelector('body.ready', { timeout: 120000 });

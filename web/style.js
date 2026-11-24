@@ -7,7 +7,25 @@
 // Unlit (MeshBasicNodeMaterial) so it's identical on WebGPU and WebGL 2.
 
 import * as THREE from 'three';
-import { float, vec3, dot, normalWorld, normalView, positionViewDirection, smoothstep, mix, color, texture } from 'three/tsl';
+import { float, vec3, dot, normalWorld, normalView, normalLocal, positionLocal, positionViewDirection, smoothstep, mix, color, texture } from 'three/tsl';
+
+// Light-band softness, set per art style before building materials.
+let BAND = [0.36, 0.6];
+export function setBand(b) { BAND = b; }
+
+// Inverted-hull outline: back faces pushed out along the normal.
+const outlineCache = new Map();
+export function outlineMat(hex, w) {
+  const key = hex + '|' + w.toFixed(4);
+  let m = outlineCache.get(key);
+  if (!m) {
+    m = new THREE.MeshBasicNodeMaterial({ side: THREE.BackSide });
+    m.positionNode = positionLocal.add(normalLocal.mul(w));
+    m.colorNode = color(hex);
+    outlineCache.set(key, m);
+  }
+  return m;
+}
 
 const KEY = vec3(0.42, 0.78, 0.6).normalize();
 const SHADOW = {
@@ -22,7 +40,7 @@ const SHADOW = {
 export function litNode(base, kind = 'default', { rim = 0.16, ring = 0, ringColor = null } = {}) {
   const t = SHADOW[kind] || SHADOW.default;
   const ndl = dot(normalWorld, KEY).mul(0.5).add(0.5);
-  const band = smoothstep(0.36, 0.6, ndl);
+  const band = smoothstep(BAND[0], BAND[1], ndl);
   const shadow = base.mul(vec3(t[0], t[1], t[2]));
   let c = mix(shadow, base, band);
   c = c.add(base.mul(normalWorld.y.max(0).mul(0.04)));
@@ -40,7 +58,7 @@ export function litNode(base, kind = 'default', { rim = 0.16, ring = 0, ringColo
 
 const cache = new Map();
 export function paint(hex, kind = 'default', opts = {}) {
-  const key = [hex, kind, JSON.stringify(opts)].join('|');
+  const key = [hex, kind, JSON.stringify(opts), BAND.join(',')].join('|');
   let m = cache.get(key);
   if (m) return m;
   m = new THREE.MeshBasicNodeMaterial();

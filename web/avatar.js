@@ -3,7 +3,7 @@
 // eyes, one shared stylised paint shader (style.js), painted canvas faces. All geometry is procedural (no art assets).
 
 import * as THREE from 'three';
-import { paint, paintTex, paintHair } from './style.js';
+import { paint, paintTex, paintHair, setBand, outlineMat } from './style.js';
 
 // ---------------------------------------------------------------- helpers
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -45,6 +45,14 @@ function shade(hex, dl, ds = 1) {
 const PANTS = ['#4a5a86', '#3a3f52', '#8a6d4f', '#5d7a5a', '#6d5a8a', '#c9a66b'];
 const SHOES = ['#fbf7ef', '#5a3d30', '#e0604f', '#3a3a44', '#f1c75b', '#7cc3d6'];
 const SHIRTS = ['#f28b82', '#7fb8e6', '#9bd88a', '#f6cd61', '#c3a3ef', '#f5a8c8', '#6fd0c6'];
+
+// Art-style presets: same traits, different design language.
+export const STYLES = {
+  gumdrop: { label: 'Gumdrop', body: 'stubby', eyes: 'gem', headK: 0.85, warm: 0.25, eyeK: 1, gapAdd: 0, pitchEye: -0.25, brow: 1, nose: 'bump', mouthK: 1, blushK: 1, band: [0.36, 0.6], outline: 0, skinSat: 1 },
+  sprout: { label: 'Sprout', body: 'lithe', eyes: 'sclera', headK: 0.74, warm: 0.5, eyeK: 1.2, gapAdd: 0.06, pitchEye: -0.16, brow: 0.6, nose: 'dot', mouthK: 2, blushK: 1.25, band: [0.42, 0.56], outline: 0, skinSat: 1.18 },
+  mochi: { label: 'Mochi', body: 'bean', eyes: 'bean', headK: 0.92, warm: 0.4, eyeK: 0.9, gapAdd: 0.04, pitchEye: -0.3, brow: 0.55, nose: 'none', mouthK: 0.8, blushK: 1.55, band: [0.3, 0.66], outline: 0, skinSat: 1.05, sxK: 1.07, syK: 0.95 },
+  storybook: { label: 'Storybook', body: 'lithe', eyes: 'lash', headK: 0.76, warm: 0.45, eyeK: 1, gapAdd: 0.03, pitchEye: -0.2, brow: 0.8, nose: 'dot', mouthK: 1, blushK: 1.1, band: [0.48, 0.5], outline: 0.028, skinSat: 1.12 },
+};
 
 export function traitsToParams(t, name = '') {
   const r = rng(hashStr(name || JSON.stringify(t.color || {})));
@@ -322,8 +330,8 @@ function hairShell(P, F, spec) {
 function buildHair(P, F, grp) {
   const len = P.hairLength;
   const hm = paintHair(P.hair, strandTex(), { side: THREE.DoubleSide });
-  const base = (len === 'short' ? 1.06 : 1.08) + P.volume * 0.1;
-  const rf = (th, phi) => base + P.volume * 0.12 * Math.sin(th) + 0.05 * Math.pow(Math.max(0, Math.cos(th)), 2)
+  const base = (len === 'short' ? 1.05 : 1.065) + P.volume * 0.06;
+  const rf = (th, phi) => base + P.volume * 0.07 * Math.sin(th) + 0.05 * Math.pow(Math.max(0, Math.cos(th)), 2)
     + (P.curly ? 0.055 * Math.sin(phi * 11 + Math.sin(th * 7) * 1.5) * Math.sin(th * 9) + 0.06 : 0.022 * Math.sin(phi * 13 + th * 2)) * Math.sin(Math.min(th, 1.6));
   const spec = {
     front: P.recede ? 0.9 : 0.95,
@@ -429,13 +437,13 @@ function faceCanvas(P, geo, closed) {
   const g = cv.getContext('2d');
   const X = (yaw) => FACE_S / 2 + yaw * FACE_K, Y = (p) => FACE_S / 2 - p * FACE_K;
   const kx = (p) => FACE_K / (P.sx * Math.cos(p)), ky = FACE_K / P.sy;
-  const { gap, pitchEye, ex, ey, mouthPitch } = geo;
+  const { S, gap, pitchEye, ex, ey, mouthPitch } = geo;
   const ink = shade(mix(P.hair, '#2a1a24', 0.6), -0.05);
   g.lineCap = 'round'; g.lineJoin = 'round';
 
   // blush
   for (const sd of [-1, 1]) {
-    const cx = X(sd * (gap + 0.2)), cy = Y(pitchEye - 0.22), rx = 0.17 * kx(pitchEye - 0.22), ry = 0.1 * ky;
+    const cx = X(sd * (gap + 0.2 + (S.blushK - 1) * 0.08)), cy = Y(pitchEye - 0.22), rx = 0.17 * S.blushK * kx(pitchEye - 0.22), ry = 0.1 * S.blushK * ky;
     g.save(); g.translate(cx, cy); g.scale(1, ry / rx);
     const gr = g.createRadialGradient(0, 0, 0, 0, 0, rx);
     gr.addColorStop(0, `rgba(255,118,138,${(P.blush * 0.8).toFixed(2)})`);
@@ -481,6 +489,38 @@ function faceCanvas(P, geo, closed) {
       g.beginPath(); g.ellipse(cx, cy - ry * 0.05, rx * 0.95, ry * 0.32, 0, Math.PI * 0.08, Math.PI * 0.92); g.stroke();
       continue;
     }
+    if (S.eyes === 'sclera') {
+      // white of the eye, iris + pupil, lid line
+      const wrx = rx * 1.02, wry = ry * 1.0;
+      g.fillStyle = '#fffdf8';
+      g.beginPath(); g.ellipse(cx, cy, wrx, wry, 0, 0, Math.PI * 2); g.fill();
+      g.save(); g.beginPath(); g.ellipse(cx, cy, wrx, wry, 0, 0, Math.PI * 2); g.clip();
+      const ir = Math.min(wrx, wry) * 0.92, ix = cx - sd * wrx * 0.04, iy = cy + wry * 0.04;
+      const ig = g.createRadialGradient(ix, iy + ir * 0.3, ir * 0.1, ix, iy, ir);
+      ig.addColorStop(0, irisLight); ig.addColorStop(0.75, irisDark); ig.addColorStop(1, '#2a1d26');
+      g.fillStyle = ig; g.beginPath(); g.arc(ix, iy, ir, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#160f18'; g.beginPath(); g.arc(ix, iy, ir * 0.46, 0, Math.PI * 2); g.fill();
+      g.fillStyle = 'rgba(40,20,40,0.18)'; g.fillRect(cx - wrx, cy - wry, wrx * 2, wry * 0.35);
+      g.restore();
+      g.fillStyle = '#ffffff';
+      g.beginPath(); g.arc(ix + ir * 0.32, iy - ir * 0.36, ir * 0.3, 0, Math.PI * 2); g.fill();
+      g.beginPath(); g.arc(ix - ir * 0.35, iy + ir * 0.38, ir * 0.12, 0, Math.PI * 2); g.fill();
+      g.strokeStyle = ink; g.lineWidth = rx * 0.13;
+      g.beginPath(); g.ellipse(cx, cy, wrx, wry, 0, Math.PI * 1.05, Math.PI * 1.95); g.stroke();
+      g.lineWidth = rx * 0.05; g.strokeStyle = 'rgba(60,30,40,0.35)';
+      g.beginPath(); g.ellipse(cx, cy, wrx, wry, 0, Math.PI * 0.2, Math.PI * 0.8); g.stroke();
+      continue;
+    }
+    if (S.eyes === 'bean') {
+      const brx = rx * 0.58, bry = ry * 0.78;
+      g.fillStyle = '#271c27';
+      g.beginPath(); g.ellipse(cx, cy, brx, bry, 0, 0, Math.PI * 2); g.fill();
+      if (P.lightEyes) { g.fillStyle = irisLight; g.globalAlpha = 0.55; g.beginPath(); g.ellipse(cx, cy + bry * 0.45, brx * 0.7, bry * 0.35, 0, 0, Math.PI * 2); g.fill(); g.globalAlpha = 1; }
+      g.fillStyle = '#ffffff';
+      g.beginPath(); g.ellipse(cx + brx * 0.25, cy - bry * 0.38, brx * 0.36, bry * 0.26, -0.4, 0, Math.PI * 2); g.fill();
+      g.beginPath(); g.arc(cx - brx * 0.3, cy + bry * 0.4, brx * 0.13, 0, Math.PI * 2); g.fill();
+      continue;
+    }
     // body: dark top fading into the iris colour
     const gr = g.createLinearGradient(cx, cy - ry, cx, cy + ry);
     gr.addColorStop(0, '#1b1320'); gr.addColorStop(0.45, irisDark); gr.addColorStop(1, irisLight);
@@ -495,6 +535,15 @@ function faceCanvas(P, geo, closed) {
     const ox = cx + sd * rx * 0.98, oy = cy - ry * 0.28;
     g.lineWidth = rx * 0.14;
     g.beginPath(); g.moveTo(ox - sd * rx * 0.1, oy - ry * 0.05); g.quadraticCurveTo(ox + sd * rx * 0.2, oy - ry * 0.12, ox + sd * rx * 0.3, oy - ry * 0.32); g.stroke();
+    if (S.eyes === 'lash') {
+      g.lineWidth = rx * 0.09;
+      for (const k of [0, 1]) {
+        const a = Math.PI * (1.62 + k * 0.14) * (sd > 0 ? 1 : 1);
+        const ang = sd > 0 ? Math.PI * (1.7 + k * 0.13) : Math.PI * (1.3 - k * 0.13);
+        const bx = cx + Math.cos(ang) * rx * 1.03, by = cy + Math.sin(ang) * ry * 1.03;
+        g.beginPath(); g.moveTo(bx, by); g.lineTo(bx + Math.cos(ang) * rx * 0.28 + sd * rx * 0.08, by + Math.sin(ang) * ry * 0.22); g.stroke();
+      }
+    }
     // highlights
     g.fillStyle = '#ffffff';
     g.beginPath(); g.ellipse(cx + rx * 0.3, cy - ry * 0.4, rx * 0.34, ry * 0.26, -0.5, 0, Math.PI * 2); g.fill();
@@ -520,7 +569,7 @@ function faceCanvas(P, geo, closed) {
       thick = 0.04;
       pts = [-0.6, -0.3, 0, 0.3, 0.6].map((t) => [X(yaw + t * 0.2 * sd), Y(pitchEye + ey + 0.075 + (0.09 - t * t * 0.25) * 0.4)]);
     }
-    const w0 = clamp(0.028 + (thick - 0.035) * 0.7, 0.02, 0.05) * P.browThick * ky;
+    const w0 = clamp(0.028 + (thick - 0.035) * 0.7, 0.02, 0.05) * P.browThick * ky * S.brow;
     const left = [], right = [];
     pts.forEach((p, i) => {
       const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)];
@@ -537,16 +586,22 @@ function faceCanvas(P, geo, closed) {
   }
 
   // nose: a soft little shadow
-  {
+  if (S.nose !== 'none') {
     const cx = X(0), cy = Y(pitchEye - 0.17);
     g.fillStyle = 'rgba(190,95,90,0.32)';
-    g.beginPath(); g.ellipse(cx, cy, 0.04 * kx(pitchEye) * P.nose, 0.022 * ky, 0, 0, Math.PI * 2); g.fill();
+    if (S.nose === 'dot') { g.fillStyle = 'rgba(200,100,95,0.5)'; g.beginPath(); g.ellipse(cx, cy, 0.03 * kx(pitchEye) * P.nose, 0.022 * ky, 0, 0, Math.PI * 2); g.fill(); g.fillStyle = 'rgba(255,255,255,0.5)'; g.beginPath(); g.arc(cx + 4, cy - 4, 3, 0, Math.PI * 2); g.fill(); }
+    else { g.beginPath(); g.ellipse(cx, cy, 0.04 * kx(pitchEye) * P.nose, 0.022 * ky, 0, 0, Math.PI * 2); g.fill(); }
   }
 
   // mouth
   {
-    const cx = X(0), cy = Y(mouthPitch), mk = kx(mouthPitch);
-    if (P.mouth === 'grin') {
+    const cx = X(0), cy = Y(mouthPitch), mk = kx(mouthPitch) * S.mouthK;
+    if (S.eyes === 'bean' && P.mouth !== 'grin') {
+      // little omega mouth
+      const rx = 0.04 * P.mouthW * mk;
+      g.strokeStyle = '#6a2232'; g.lineWidth = 5.5;
+      for (const sd of [-1, 1]) { g.beginPath(); g.arc(cx + sd * rx, cy, rx, 0.15, Math.PI - 0.15); g.stroke(); }
+    } else if (P.mouth === 'grin') {
       const rx = 0.13 * P.mouthW * mk, ry = 0.11 * P.mouthW * ky;
       const path = () => { g.beginPath(); g.moveTo(cx - rx, cy); g.quadraticCurveTo(cx, cy + ry * 0.12, cx + rx, cy); g.ellipse(cx, cy, rx, ry, 0, 0, Math.PI); g.closePath(); };
       path(); g.fillStyle = '#6a2232'; g.fill();
@@ -587,12 +642,12 @@ function faceDecalGeo(F) {
   return g;
 }
 
-function buildFace(P, F, grp) {
+function buildFace(P, F, grp, S) {
   const skinM = soft(P.skin, { kind: 'skin' });
-  const pitchEye = -0.25;
-  const ex = 0.155 * P.eyeScale, ey = 0.2 * P.eyeScale * P.eyeOpen * (P.smileSquash ?? 1);
-  const gap = P.eyeGap + 0.04;
-  const geo = { gap, pitchEye, ex, ey, mouthPitch: pitchEye - (P.mouth === 'grin' ? 0.29 : 0.31) };
+  const pitchEye = S.pitchEye;
+  const ex = 0.155 * P.eyeScale * S.eyeK, ey = 0.2 * P.eyeScale * P.eyeOpen * (P.smileSquash ?? 1) * S.eyeK;
+  const gap = P.eyeGap + 0.04 + S.gapAdd;
+  const geo = { S, gap, pitchEye, ex, ey, mouthPitch: pitchEye - (P.mouth === 'grin' ? 0.29 : 0.31) * (S.eyes === 'bean' ? 0.75 : 1) };
 
   const dg = faceDecalGeo(F);
   const open = mesh(dg, paintTex(faceCanvas(P, geo, false), 'skin', { alpha: true, rim: 0 }));
@@ -607,10 +662,12 @@ function buildFace(P, F, grp) {
     ear.position.copy(F.surface(sd * 1.5, pitchEye - 0.05, -0.03).p);
     grp.add(ear);
   }
-  const nose = mesh(SPHERE(), skinM);
-  nose.scale.set(0.045 * P.nose, 0.034, 0.03);
-  place(nose, F.surface(0, pitchEye - 0.15, -0.005));
-  grp.add(nose);
+  if (S.nose === 'bump') {
+    const nose = mesh(SPHERE(), skinM);
+    nose.scale.set(0.045 * P.nose, 0.034, 0.03);
+    place(nose, F.surface(0, pitchEye - 0.15, -0.005));
+    grp.add(nose);
+  }
 
   if (P.glasses) {
     const frameM = soft(P.glasses, { rough: 0.3, rim: 0.15 });
@@ -718,24 +775,77 @@ const torsoGeo = () => cached('torso', () => new THREE.LatheGeometry([
   V(0.44, 0.55, 0), V(0.33, 0.7, 0), V(0.16, 0.77, 0), V(0.001, 0.78, 0),
 ].map((p) => new THREE.Vector2(p.x, p.y)), 40, Math.PI));
 
-export function buildAvatar(P) {
-  const root = new THREE.Group();
-  const body = new THREE.Group();
-  root.add(body);
-  body.scale.setScalar(P.height);
-  const skinM = soft(P.skin, { kind: 'skin' });
-  const shirtM = paintTex(shirtTexture(P), 'cloth');
-  const pantsM = soft(P.pants, { kind: 'cloth' });
+// Push photo skin toward a warm, saturated toy tone (keeps relative lightness).
+function warmSkin(hex, S) {
+  const c = new THREE.Color(hex), h = {};
+  c.getHSL(h, THREE.SRGBColorSpace);
+  const w = S.warm || 0;
+  c.setHSL(lerp(h.h, 0.055, w), clamp(h.s * (S.skinSat || 1) * (1 + w * 0.5), 0, 0.78), clamp(h.l + w * 0.05, 0.2, 0.88), THREE.SRGBColorSpace);
+  return '#' + c.getHexString();
+}
 
-  const shadow = mesh(cached('shadowq', () => new THREE.PlaneGeometry(1, 1)), blobShadowMaterial());
-  shadow.rotation.x = -Math.PI / 2;
-  shadow.position.y = 0.01;
-  shadow.scale.setScalar(1.5 * P.height);
-  shadow.renderOrder = -1;
-  root.add(shadow);
+// Hair gets more saturation (and a little warmth for light hair) in the toy styles.
+function toyHair(hex, S) {
+  const w = S.warm || 0;
+  if (!w) return hex;
+  const c = new THREE.Color(hex), h = {};
+  c.getHSL(h, THREE.SRGBColorSpace);
+  if (h.s < 0.12 && h.l > 0.45) return hex; // grey stays grey
+  const light = h.l > 0.42;
+  c.setHSL(light ? lerp(h.h, 0.11, w * 0.6) : h.h, clamp(h.s * (1 + w * (light ? 1.6 : 0.6)), 0, 0.8), clamp(h.l + (light ? w * 0.08 : w * 0.03), 0, 0.85), THREE.SRGBColorSpace);
+  return '#' + c.getHexString();
+}
 
-  // stubby legs + round shoes
-  const legs = [];
+function buildBody(P, S, body, { skinM, shirtM, pantsM }) {
+  const legs = [], arms = [];
+  const shoeM = soft(P.shoes, { kind: 'cloth', rim: 0.2 });
+  if (S.body === 'lithe') {
+    for (const sd of [-1, 1]) {
+      const leg = new THREE.Group();
+      leg.position.set(sd * 0.13, 0.74, 0);
+      const l = mesh(cached('legL', () => new THREE.CapsuleGeometry(0.09, 0.44, 6, 14)), pantsM);
+      l.position.y = -0.33;
+      const shoe = mesh(SPHERE(), shoeM);
+      shoe.scale.set(0.135, 0.1, 0.22);
+      shoe.position.set(0, -0.67, 0.06);
+      leg.add(l, shoe); body.add(leg); legs.push(leg);
+    }
+    const hips = mesh(SPHERE(), pantsM); hips.scale.set(0.33, 0.17, 0.27); hips.position.y = 0.78; body.add(hips);
+    const torso = mesh(cached('torsoL', () => new THREE.LatheGeometry([
+      [0.001, 0], [0.34, 0], [0.39, 0.07], [0.37, 0.3], [0.31, 0.52], [0.22, 0.66], [0.1, 0.72], [0.001, 0.73],
+    ].map(([x, y]) => new THREE.Vector2(x, y)), 36, Math.PI)), shirtM);
+    torso.position.y = 0.72; body.add(torso);
+    for (const sd of [-1, 1]) {
+      const arm = new THREE.Group();
+      arm.position.set(sd * 0.27, 1.32, 0);
+      const sleeve = mesh(cached('sleeve', () => new THREE.CapsuleGeometry(0.095, 0.08, 6, 12)), shirtM); sleeve.position.y = -0.07;
+      const a = mesh(cached('armL', () => new THREE.CapsuleGeometry(0.06, 0.28, 6, 12)), skinM); a.position.y = -0.26;
+      const hand = mesh(SPHERE(), skinM); hand.scale.setScalar(0.105); hand.position.y = -0.47;
+      arm.add(sleeve, a, hand); arm.rotation.z = sd * 0.7; body.add(arm); arms.push(arm);
+    }
+    return { legs, arms, torso, neckTop: 1.4, headLift: 0.86, armRest: 0.7 };
+  }
+  if (S.body === 'bean') {
+    for (const sd of [-1, 1]) {
+      const leg = new THREE.Group();
+      leg.position.set(sd * 0.16, 0.14, 0.02);
+      const foot = mesh(SPHERE(), shoeM); foot.scale.set(0.12, 0.08, 0.15); foot.position.y = -0.07;
+      leg.add(foot); body.add(leg); legs.push(leg);
+    }
+    const torso = mesh(cached('torsoB', () => new THREE.LatheGeometry([
+      [0.001, 0], [0.28, 0], [0.4, 0.1], [0.43, 0.28], [0.37, 0.46], [0.22, 0.58], [0.001, 0.61],
+    ].map(([x, y]) => new THREE.Vector2(x, y)), 36, Math.PI)), shirtM);
+    torso.position.y = 0.08; body.add(torso);
+    for (const sd of [-1, 1]) {
+      const arm = new THREE.Group();
+      arm.position.set(sd * 0.36, 0.5, 0);
+      const a = mesh(cached('armB', () => new THREE.CapsuleGeometry(0.08, 0.06, 6, 12)), shirtM); a.position.y = -0.07;
+      const hand = mesh(SPHERE(), skinM); hand.scale.setScalar(0.085); hand.position.y = -0.17;
+      arm.add(a, hand); arm.rotation.z = sd * 0.5; body.add(arm); arms.push(arm);
+    }
+    return { legs, arms, torso, neckTop: 0.62, headLift: 0.78, armRest: 0.5 };
+  }
+  // stubby (default)
   for (const sd of [-1, 1]) {
     const leg = new THREE.Group();
     leg.position.set(sd * 0.17, 0.4, 0);
@@ -758,7 +868,6 @@ export function buildAvatar(P) {
   body.add(torso);
 
   // short arms with mitten hands
-  const arms = [];
   for (const sd of [-1, 1]) {
     const arm = new THREE.Group();
     arm.position.set(sd * 0.38, 0.98, 0);
@@ -773,10 +882,36 @@ export function buildAvatar(P) {
     arms.push(arm);
   }
 
+  return { legs, arms, torso, neckTop: 1.08, headLift: 0.9, armRest: 0.35 };
+}
+
+export function buildAvatar(P0) {
+  const S = STYLES[P0.style] || STYLES.gumdrop;
+  setBand(S.band);
+  const P = { ...P0, sx: P0.sx * (S.sxK || 1), sy: P0.sy * (S.syK || 1),
+    skin: warmSkin(P0.skin, S), hair: toyHair(P0.hair, S) };
+  const root = new THREE.Group();
+  const body = new THREE.Group();
+  root.add(body);
+  body.scale.setScalar(P.height);
+  const skinM = soft(P.skin, { kind: 'skin' });
+  const shirtM = paintTex(shirtTexture(P), 'cloth');
+  const pantsM = soft(P.pants, { kind: 'cloth' });
+
+  const shadow = mesh(cached('shadowq', () => new THREE.PlaneGeometry(1, 1)), blobShadowMaterial());
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.position.y = 0.01;
+  shadow.scale.setScalar(1.5 * P.height);
+  shadow.renderOrder = -1;
+  root.add(shadow);
+
+  const B = buildBody(P, S, body, { skinM, shirtM, pantsM });
+  const { legs, arms, torso } = B;
+
   // big head
   const head = new THREE.Group();
-  const headScale = (P.kid ? 1.02 : 0.95) / P.height;
-  head.position.y = 1.08 + P.sy * 0.9 * headScale;
+  const headScale = (P.kid ? 1.02 : 0.95) / P.height * S.headK;
+  head.position.y = B.neckTop + P.sy * B.headLift * headScale;
   head.scale.setScalar(headScale);
   body.add(head);
 
@@ -791,8 +926,18 @@ export function buildAvatar(P) {
   }
   hg.computeVertexNormals();
   head.add(mesh(hg, skinM));
-  const face = buildFace(P, F, head);
+  const face = buildFace(P, F, head, S);
   buildHair(P, F, head);
+
+  if (S.outline) {
+    const meshes = [];
+    root.traverse((o) => { if (o.isMesh && !o.material.transparent && o.material.side !== THREE.DoubleSide && o !== shadow) meshes.push(o); });
+    for (const m of meshes) {
+      const sc = (Math.abs(m.scale.x) + Math.abs(m.scale.y) + Math.abs(m.scale.z)) / 3 || 1;
+      const ol = new THREE.Mesh(m.geometry, outlineMat('#4a2e34', S.outline / sc));
+      m.add(ol);
+    }
+  }
 
   const st = { phase: Math.random() * 10, blinkAt: 1 + Math.random() * 4, blink: 0, hop: 0, wave: 0, walk: 0 };
   root.userData.headCenterY = head.position.y * P.height;
@@ -818,13 +963,13 @@ export function buildAvatar(P) {
     const sw = walking ? Math.sin(st.walk) * 0.7 : 0;
     legs[0].rotation.x = sw; legs[1].rotation.x = -sw;
     arms[0].rotation.x = -sw * 0.9; arms[1].rotation.x = sw * 0.9;
-    arms[0].rotation.z = -0.35 - breathe * 0.04;
+    arms[0].rotation.z = -B.armRest - breathe * 0.04;
     if (st.wave > 0) {
       st.wave = Math.max(0, st.wave - dt * 0.6);
       arms[1].rotation.z = 2.5 + Math.sin(t * 14) * 0.35;
       arms[1].rotation.x = 0;
     } else {
-      arms[1].rotation.z = 0.35 + breathe * 0.04;
+      arms[1].rotation.z = B.armRest + breathe * 0.04;
     }
     head.rotation.y = lerp(head.rotation.y, clamp(lookYaw, -0.6, 0.6) + Math.sin(ph * 0.5) * 0.08, Math.min(1, dt * 4));
     head.rotation.x = lerp(head.rotation.x, clamp(lookPitch, -0.25, 0.25), Math.min(1, dt * 4));
