@@ -23,6 +23,12 @@
   .label.hot { transform: scale(1.15); background: #ffe8a3; }
   .label .n { display: inline-block; min-width: 1.5em; margin: 0 5px 0 -5px; padding: 0 4px; border-radius: 999px; background: #ff8f6b; color: #fff; text-align: center; }
   .label .n:empty { display: none; }
+  .label.now { background: #ffe8a3; transform: scale(1.12); }
+  .label.now .n { animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { transform: scale(1.18); } }
+  .label.done { opacity: .62; }
+  .label.done .n { background: #6cc287; }
+  .label.done span { text-decoration: line-through; text-decoration-thickness: 2px; }
   button:disabled { opacity: .5; }
   button.soft { background: var(--card); color: var(--ink); box-shadow: 0 3px 0 rgba(0,0,0,.12); }
   header { position: fixed; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: 8px; padding: max(12px, env(safe-area-inset-top)) 14px 0; pointer-events: none; }
@@ -32,19 +38,9 @@
   .grow { flex: 1; }
   select.pill { border: 0; font: inherit; font-size: 12px; font-weight: 700; color: var(--ink); }
   .pill, button { white-space: nowrap; }
-  @media (max-width: 520px) { #backend, #stylesLink, #addBtn .txt, #countPill { display: none; } header { gap: 6px; } header button { padding: 7px 12px; } select.pill { max-width: 104px; } }
+  @media (max-width: 520px) { #backend, #addBtn .txt, #countUnit { display: none; } header { gap: 6px; } header button { padding: 7px 12px; } select.pill { max-width: 104px; } }
   button { font: inherit; font-weight: 700; border: 0; border-radius: 999px; padding: 8px 14px; background: #ff8f6b; color: #fff; box-shadow: 0 3px 0 #d96c49; cursor: pointer; }
   button:active { transform: translateY(2px); box-shadow: 0 1px 0 #d96c49; }
-  #panel { position: fixed; right: 14px; top: 64px; width: 260px; max-width: calc(100vw - 28px); background: var(--card); border-radius: 22px; padding: 14px; box-shadow: 0 6px 0 rgba(0,0,0,.08), 0 10px 30px rgba(0,0,0,.12); transform: translateY(-10px); opacity: 0; pointer-events: none; transition: .2s; }
-  #panel.open { transform: none; opacity: 1; pointer-events: auto; }
-  #panel img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 14px; display: block; }
-  #panel h2 { margin: 10px 0 6px; font-size: 18px; }
-  #panel .x { position: absolute; top: 6px; right: 6px; width: 32px; height: 32px; padding: 0; background: var(--card); color: var(--ink); box-shadow: none; font-size: 20px; }
-  .sw { display: flex; gap: 6px; margin-bottom: 8px; }
-  .sw i { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.12); }
-  .chips { display: flex; flex-wrap: wrap; gap: 5px; }
-  .chips span { background: #eef6e6; border-radius: 999px; padding: 2px 9px; font-size: 12px; font-weight: 600; }
-  .muted { color: #7a7884; font-size: 13px; margin: 8px 0 0; }
   #toast { position: fixed; left: 50%; bottom: max(18px, env(safe-area-inset-bottom)); transform: translate(-50%, 20px); opacity: 0; background: var(--ink); color: #fff; padding: 8px 14px; border-radius: 999px; font-size: 13px; font-weight: 600; transition: .2s; pointer-events: none; max-width: calc(100vw - 28px); text-align: center; }
   #toast.on { opacity: 1; transform: translate(-50%, 0); }
   dialog { border: 0; border-radius: 22px; padding: 18px; width: min(340px, calc(100vw - 28px)); background: var(--card); color: var(--ink); }
@@ -56,9 +52,6 @@
   dialog .ghost { background: transparent; color: var(--ink); box-shadow: none; }
   .hint { font-size: 12px; color: #7a7884; margin: 6px 0 0; }
   @media (max-width: 520px) {
-    #panel { top: auto; bottom: 12px; right: 14px; display: grid; grid-template-columns: 96px 1fr; gap: 0 12px; align-items: start; }
-    #panel img { grid-row: span 3; }
-    #panel h2 { margin: 2px 0 4px; }
     h1 { font-size: 18px; }
   }
 </style>
@@ -67,15 +60,13 @@
 <div id="stage"></div>
 <header>
   <h1>Minis</h1>
-  <span class="pill" id="countPill"><span id="count">0</span> folks</span>
+  <span class="pill" id="countPill"><span id="count">0</span><span id="countUnit"> folks</span></span>
   <span class="pill" id="backend">…</span>
   <span class="grow"></span>
-  <select id="styleSel" class="pill" aria-label="Art style"></select>
-  <a class="pill" id="stylesLink" href="styles.html" style="text-decoration:none;color:inherit">Styles</a>
-  <button id="shuffleBtn" disabled>Shuffle</button>
+  <button id="nextBtn" disabled title="Mark the person at the front as done (N)">Next</button>
+  <button id="shuffleBtn" class="soft" disabled title="New random order (S)">Shuffle</button>
   <button id="addBtn" class="soft" aria-label="Add someone">+<span class="txt"> Add</span></button>
 </header>
-<aside id="panel"></aside>
 <div id="toast"></div>
 <dialog id="addDlg">
   <form id="addForm">

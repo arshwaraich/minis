@@ -2,15 +2,12 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/CSS2DRenderer.js';
 import { traitsToParams, buildAvatar, blobShadowMaterial, STYLES } from './avatar.js';
-import { traitLabels } from './labels.js';
 import { paint } from './style.js';
 
 const qs = new URLSearchParams(location.search);
 const $ = (s) => document.querySelector(s);
 const LOCAL_KEY = 'minis.added.v1';
-const STYLE_OPTS = Object.fromEntries(Object.entries(STYLES).map(([k, v]) => [k, v.label]));
-const pickStyle = (v) => (v && STYLE_OPTS[v] ? v : null);
-const STYLE = pickStyle(qs.get('style')) || pickStyle(localStorage.getItem('minis.style')) || 'sprout';
+const STYLE = STYLES[qs.get('style')] ? qs.get('style') : 'storybook';
 
 // ------------------------------------------------------------------ renderer
 const renderer = new THREE.WebGPURenderer({ antialias: true, alpha: true, forceWebGL: qs.has('gl') });
@@ -154,7 +151,7 @@ function addPerson(person, traits) {
   el.className = 'label';
   el.innerHTML = `<b class="n"></b><span></span>`;
   el.lastChild.textContent = person.name;
-  el.addEventListener('click', () => select(i));
+  el.addEventListener('click', () => toggleDone(i));
   el.addEventListener('pointerenter', () => hover(i));
   const label = new CSS2DObject(el);
   label.position.set(0, av.root.userData.headTopY + 0.25, 0);
@@ -172,8 +169,8 @@ function layout() {
   crowd.forEach((c, i) => { c.home = homeFor(i); if (MODE === 'crowd') c.target.copy(c.home); });
   if (MODE === 'line') {
     // newcomers join the end of the line
-    const missing = [...crowd.keys()].filter((i) => !order.includes(i));
-    lineUp([...order, ...missing]);
+    order = [...order, ...[...crowd.keys()].filter((i) => !order.includes(i))];
+    arrange();
     return;
   }
   const d = Math.max(10, R * 2.4) * (innerWidth < innerHeight ? Math.min(2.1, 0.95 * innerHeight / innerWidth) : 1);
@@ -183,38 +180,55 @@ function layout() {
     controls.update();
 }
 
-// ------------------------------------------------------------------ line-up & shuffle
-// The crowd forms a line facing the camera in a random order (new order on every load).
-// Shuffling walks everyone to their new spot: people moving right step out in front of
-// the line, people moving left step out behind it, so they pass instead of colliding.
+// ------------------------------------------------------------------ queue: order + done
+// A queue that replaces an ordered checklist. On load the crowd lines up in a fresh random
+// order; the head of the queue is "now". Marking someone done (click them, or Next) sends
+// them to the done row behind the queue and everyone after them steps forward one place.
+// Shuffle = a new random order with nothing done. On a shuffle, people moving right step out
+// in front of the line and people moving left step out behind it; a separation pass keeps
+// anyone from walking through anyone else.
 let MODE = 'crowd';
-let order = [];
+let order = [];             // crowd indices in queue order
+const done = new Set();
+let doneOrder = [];         // in the order they were finished
 let camFly = null;
 
-function lineGeometry(n) {
+function perRowFor(n) {
   const portrait = innerWidth < innerHeight * 0.9;
-  const perRow = Math.max(1, Math.min(n, portrait ? 4 : 14));
-  const rows = Math.ceil(n / perRow);
-  const slots = [];
-  for (let i = 0; i < n; i++) {
-    const row = Math.floor(i / perRow), col = i % perRow;
-    const inRow = row === rows - 1 ? n - row * perRow : perRow;
-    // row 0 at the back so reading order (top-left first) matches line order
-    slots.push(new THREE.Vector3((col - (inRow - 1) / 2) * LINE.SX, 0, LINE.Z0 - (rows - 1 - row) * LINE.SZ));
-  }
-  return { slots, perRow, rows };
+  return Math.max(1, Math.min(n, portrait ? 4 : 14));
+}
+// Fixed grid anchored at the left, so the queue moves up by stepping left.
+function slotAt(k, G, zRow0, dir) {
+  const row = Math.floor(k / G.perRow), col = k % G.perRow;
+  return new THREE.Vector3((col - (G.perRow - 1) / 2) * G.SX, 0, zRow0 + dir * row * G.SZ);
+}
+function layoutGeometry() {
+  const N = crowd.length, perRow = perRowFor(N);
+  // several rows (phones): wider spacing so the walking lanes between rows and the
+  // gaps between columns stay a full body-width away from anyone standing
+  const multi = perRow < N;
+  const SX = multi ? 2.0 : LINE.SX, SZ = multi ? 3.2 : LINE.SZ;
+  const RQ = Math.ceil(N / perRow);
+  // queue rows: head row furthest back (so reading order top-left first = queue order)
+  const queueRow0 = LINE.Z0 - (RQ - 1) * SZ;
+  const doneRow0 = queueRow0 - SZ - 0.4;
+  const RD = Math.ceil(doneOrder.length / perRow);
+  const zc = (LINE.Z0 + queueRow0) / 2;
+  return { N, perRow, RQ, RD, queueRow0, doneRow0, SX, SZ, multi, zc };
 }
 
-function frameLine(G, dur = 1.6) {
-  const W = (G.perRow - 1) * LINE.SX + 4.2, D = (G.rows - 1) * LINE.SZ;
+function frameAll(ext, dur = 1.6) {
+  const W = ext.maxX - ext.minX + 5.2;
+  const D = ext.maxZ - ext.minZ;
+  const cx = (ext.minX + ext.maxX) / 2;
   const fov = THREE.MathUtils.degToRad(camera.fov);
   const hfov = 2 * Math.atan(Math.tan(fov / 2) * camera.aspect);
-  const multi = G.rows > 1;
-  const d = Math.max(W / 2 / Math.tan(hfov / 2), ((multi ? D * 0.95 : 0) + 5.5) / 2 / Math.tan(fov / 2), 7);
-  const tgt = new THREE.Vector3(0, multi ? 1.1 : 1.6, LINE.Z0 - D / 2);
+  const multi = D > 0.5;
+  const d = Math.max(W / 2 / Math.tan(hfov / 2) * (multi ? 1.12 : 1), ((multi ? D * 0.95 : 0) + 5.5) / 2 / Math.tan(fov / 2), 7);
+  const tgt = new THREE.Vector3(cx, multi ? 1.1 : 1.6, ext.maxZ - D / 2);
   // several rows: look down more steeply so back rows aren't hidden behind the front
   const [up, back] = multi ? [0.72, 0.7] : [0.32, 0.95];
-  flyTo(new THREE.Vector3(0, tgt.y + d * up, tgt.z + d * back), tgt, dur);
+  flyTo(new THREE.Vector3(cx, tgt.y + d * up, tgt.z + d * back), tgt, dur);
 }
 function flyTo(pos, tgt, dur) {
   camFly = { p0: camera.position.clone(), t0: controls.target.clone(), p1: pos, t1: tgt, t: 0, dur: Math.max(0.001, dur) };
@@ -229,41 +243,129 @@ function shuffledOrder(n, avoid) {
   return a;
 }
 
-function setLabel(c, n) {
-  const b = c.el.firstChild;
-  b.textContent = n ? String(n) : '';
-  b.style.display = n ? '' : 'none';
+function refreshLabels() {
+  const head = order.find((i) => !done.has(i));
+  order.forEach((ci, k) => {
+    const c = crowd[ci], b = c.el.firstChild;
+    const isDone = done.has(ci);
+    b.textContent = isDone ? '✓' : String(k + 1);
+    c.el.classList.toggle('done', isDone);
+    c.el.classList.toggle('now', ci === head);
+  });
+  const n = crowd.length;
+  $('#count').textContent = MODE === 'line' ? `${done.size}/${n}` : String(n);
+  $('#countUnit').textContent = MODE === 'line' ? ' done' : ' folks';
+  $('#nextBtn').disabled = MODE !== 'line' || head === undefined;
 }
 
-function lineUp(newOrder) {
-  const prev = new Map();
-  if (MODE === 'line') order.forEach((ci, k) => prev.set(ci, k));
-  order = newOrder;
-  MODE = 'line';
-  const G = lineGeometry(order.length);
-  order.forEach((ci, k) => {
-    const c = crowd[ci], slot = G.slots[k], pos = c.av.root.position;
+// Send everyone to their slot. lanes=true: horizontal movers walk around via front/back lanes.
+function arrange({ lanes = false } = {}) {
+  const G = layoutGeometry();
+  const queue = order.filter((i) => !done.has(i));
+  const plan = new Map();
+  queue.forEach((ci, k) => plan.set(ci, slotAt(k, G, G.queueRow0, +1)));
+  doneOrder.forEach((ci, k) => plan.set(ci, slotAt(k, G, G.doneRow0, -1)));
+  for (const [ci, slot] of plan) {
+    const c = crowd[ci], pos = c.av.root.position;
+    if (c.target.distanceTo(slot) < 0.01 && !c.path.length) continue; // already there
     c.target = slot.clone();
     c.path = [];
-    const dx = slot.x - pos.x;
-    if (prev.has(ci) && Math.abs(dx) > 0.3) {
+    const dx = slot.x - pos.x, dz = slot.z - pos.z;
+    const P = (x, z) => new THREE.Vector3(x, 0, z);
+    if (lanes && G.multi) {
+      // several rows: breathe out (spread from the grid centre to open wide aisles),
+      // cross over in the open, then breathe back in to the new spot
+      const k = 1.75, cxg = 0, czg = G.zc;
+      const out = (v) => P(cxg + (v.x - cxg) * k, czg + (v.z - czg) * k);
+      c.path.push(out(pos), out(slot)); // everyone, so the middle is clear while people cross
+    } else if (lanes && Math.abs(dx) > 0.3) {
       const dir = dx > 0 ? 1 : -1;
       const lane = dir * Math.min(2.6, 1.0 + 0.1 * Math.abs(dx)); // longer trips walk further out
-      c.path.push(new THREE.Vector3(pos.x, 0, pos.z + lane), new THREE.Vector3(slot.x, 0, slot.z + lane));
-      c.wait = Math.random() * 0.3;
-    } else {
-      c.wait = prev.has(ci) ? 0 : Math.random() * 0.9;
+      c.path.push(P(pos.x, pos.z + lane), P(slot.x, slot.z + lane));
     }
+    c.wait = lanes ? Math.random() * 0.3 : Math.random() * 0.15;
     c.path.push(slot.clone());
-    setLabel(c, k + 1);
-  });
-  frameLine(G);
+  }
+  refreshLabels();
+  const ext = { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity };
+  for (const v of plan.values()) {
+    ext.minX = Math.min(ext.minX, v.x); ext.maxX = Math.max(ext.maxX, v.x);
+    ext.minZ = Math.min(ext.minZ, v.z); ext.maxZ = Math.max(ext.maxZ, v.z);
+  }
+  frameAll(ext);
+}
+
+function lineUp(newOrder, { lanes = MODE === 'line' } = {}) {
+  order = newOrder;
+  done.clear();
+  doneOrder = [];
+  if (MODE !== 'line') for (const c of crowd) c.wait = Math.random() * 0.9;
+  MODE = 'line';
+  arrange({ lanes });
 }
 
 function shuffle() {
   if (crowd.length < 2) return;
-  lineUp(shuffledOrder(crowd.length, MODE === 'line' ? order : null));
+  lineUp(shuffledOrder(crowd.length, MODE === 'line' ? order : null), { lanes: MODE === 'line' });
   for (const c of crowd) if (Math.random() < 0.5) c.av.hop();
+}
+
+function toggleDone(i) {
+  if (MODE !== 'line' || i < 0) return;
+  const c = crowd[i];
+  if (done.has(i)) {
+    done.delete(i);
+    doneOrder = doneOrder.filter((x) => x !== i);
+    c.av.hop();
+  } else {
+    done.add(i);
+    doneOrder.push(i);
+    c.av.wave();
+  }
+  arrange();
+  if (done.size === crowd.length) {
+    toast('Everyone is done');
+    for (const p of crowd) p.av.hop();
+  }
+}
+function next() {
+  const head = order.find((i) => !done.has(i));
+  if (head !== undefined) toggleDone(head);
+}
+
+// Keep people from walking through each other: pairwise push-apart, with a sideways nudge
+// so two people walking head-on slide past instead of stalling. Settled people barely move.
+function separate(dt) {
+  const MIN = 0.9;
+  // last resort: someone who has made no progress for 2 s may squeeze past for a moment
+  for (const c of crowd) {
+    if (c.ghost > 0) { c.ghost -= dt; continue; }
+    const goal = c.path[0] || c.target, d = c.av.root.position.distanceTo(goal);
+    const moving = c.path.length || d > 0.05;
+    if (!moving || c.wait > 0) { c.stuckT = 0; c.bestD = d; continue; }
+    if (c.bestD === undefined || d < c.bestD - 0.05 || c.goalRef !== goal) { c.bestD = d; c.stuckT = 0; c.goalRef = goal; }
+    else if ((c.stuckT = (c.stuckT || 0) + dt) > 4) { c.ghost = 0.5; c.stuckT = 0; console.debug('unstick', c.person.name); }
+  }
+  for (let i = 0; i < crowd.length; i++) {
+    const a = crowd[i], pa = a.av.root.position;
+    for (let j = i + 1; j < crowd.length; j++) {
+      const b = crowd[j], pb = b.av.root.position;
+      if (a.ghost > 0 || b.ghost > 0) continue;
+      let dx = pb.x - pa.x, dz = pb.z - pa.z;
+      let d = Math.hypot(dx, dz);
+      if (d >= MIN) continue;
+      if (d < 1e-4) { dx = 1; dz = 0; d = 1e-4; }
+      const nx = dx / d, nz = dz / d;
+      const push = MIN - d;
+      const aMoving = a.path.length || pa.distanceTo(a.target) > 0.05;
+      const bMoving = b.path.length || pb.distanceTo(b.target) > 0.05;
+      let wa = aMoving ? 1 : 0.15, wb = bMoving ? 1 : 0.15;
+      const sum = wa + wb; wa /= sum; wb /= sum;
+      const sx = nx + -nz * 0.5, sz = nz + nx * 0.5; // push + a sidestep to the right
+      pa.x -= sx * push * wa; pa.z -= sz * push * wa;
+      pb.x += sx * push * wb; pb.z += sz * push * wb;
+    }
+  }
 }
 
 // ------------------------------------------------------------------ interaction
@@ -289,27 +391,10 @@ labels.domElement.addEventListener('pointerdown', (e) => (downAt = [e.clientX, e
 labels.domElement.addEventListener('pointerup', (e) => {
   if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 6) return;
   const i = pick(e);
-  if (i >= 0) select(i); else closePanel();
+  toggleDone(i);
 });
 
 
-function select(i) {
-  const c = crowd[i];
-  c.av.wave();
-  c.av.hop();
-  const sw = (col) => `<i style="background:${col}"></i>`;
-  $('#panel').innerHTML = `
-    <button class="x" aria-label="close">×</button>
-    ${c.person.image ? `<img src="${c.person.image}" alt="">` : ''}
-    <h2>${escapeHtml(c.person.name)}</h2>
-    <div class="sw">${sw(c.params.skin)}${sw(c.params.hair)}${sw(c.params.shirt)}${c.params.glasses ? sw(c.params.glasses) : ''}</div>
-    <div class="chips">${traitLabels(c.params).map((t) => `<span>${t}</span>`).join('')}</div>
-    ${c.traits ? '' : '<p class="muted">No traits read from a photo; this one is random.</p>'}
-    <p class="muted"><a href="compare.html${qs.get('src') ? '?src=' + encodeURIComponent(qs.get('src')) : ''}#${encodeURIComponent(c.person.name)}">See everyone side by side →</a></p>`;
-  $('#panel').classList.add('open');
-  $('#panel .x').onclick = closePanel;
-}
-function closePanel() { $('#panel').classList.remove('open'); }
 function escapeHtml(s) { return String(s).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch])); }
 
 // ------------------------------------------------------------------ loading people
@@ -364,9 +449,9 @@ $('#addForm').addEventListener('submit', async (e) => {
     added.push(person);
     try { localStorage.setItem(LOCAL_KEY, JSON.stringify(added)); } catch {}
     const c = addPerson(person, traits);
-    $('#count').textContent = crowd.length;
+    refreshLabels();
     toast('');
-    select(crowd.indexOf(c));
+    c.av.wave(); c.av.hop();
   } catch (err) {
     toast(String(err.message || err).includes('face') ? 'No face found in that photo' : 'Could not read that image (it may block cross-site use)');
   }
@@ -449,6 +534,7 @@ function simulate(dt) {
     const pitch = -Math.atan2(camera.position.y - 2, Math.hypot(camera.position.x - root.position.x, camera.position.z - root.position.z)) * 0.5;
     c.av.update(t, dt, { speed, lookYaw: yaw, lookPitch: pitch });
   }
+  separate(dt);
   if (camFly) {
     camFly.t += dt;
     const k = Math.min(1, camFly.t / camFly.dur), e = k * k * (3 - 2 * k);
@@ -469,16 +555,19 @@ addEventListener('resize', () => {
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
   labels.setSize(innerWidth, innerHeight);
-  if (MODE === 'line') { clearTimeout(window.__reflow); window.__reflow = setTimeout(() => lineUp(order), 250); }
+  if (MODE === 'line') { clearTimeout(window.__reflow); window.__reflow = setTimeout(() => { for (const c of crowd) c.target.set(1e9, 0, 0); arrange(); }, 250); }
 });
 
-const sel = $('#styleSel');
-for (const [k, v] of Object.entries(STYLE_OPTS)) sel.append(new Option(v, k, false, k === STYLE));
-sel.onchange = () => { localStorage.setItem('minis.style', sel.value); const u = new URL(location); u.searchParams.set('style', sel.value); location = u; };
 
-window.__minis = { crowd, scene, camera, renderer, select, layout, shuffle, lineUp, simulate, get order() { return order; } };
+window.__minis = { crowd, scene, camera, renderer, layout, shuffle, lineUp, next, toggleDone, simulate, get order() { return order; }, get done() { return [...done]; } };
 $('#shuffleBtn').onclick = shuffle;
+$('#nextBtn').onclick = next;
+addEventListener('keydown', (e) => {
+  if (e.target.closest('input, textarea, select, dialog')) return;
+  if (e.key === 'n' || e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); next(); }
+  else if (e.key === 's') shuffle();
+});
 await loadList();
 // start as a crowd, then form the line in a fresh random order
-setTimeout(() => { lineUp(shuffledOrder(crowd.length)); $('#shuffleBtn').disabled = false; }, 1200);
+setTimeout(() => { lineUp(shuffledOrder(crowd.length), { lanes: false }); $('#shuffleBtn').disabled = false; }, 1200);
 document.body.classList.add('ready');

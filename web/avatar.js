@@ -56,10 +56,38 @@ export const STYLES = {
   storybook: { label: 'Storybook', body: 'lithe', eyes: 'lash', headK: 0.76, warm: 0.45, eyeK: 1, gapAdd: 0.03, pitchEye: -0.2, brow: 0.8, nose: 'dot', mouthK: 1, blushK: 1.1, band: [0.48, 0.5], outline: 0.028, skinSat: 1.12 },
 };
 
+// Black-and-white photos: estimate natural colours from brightness alone.
+const srgbLum = (h) => { const c = new THREE.Color(h); c.convertLinearToSRGB(); return (c.r + c.g + c.b) / 3; };
+const srgbSat = (h) => { const c = new THREE.Color(h), o = {}; c.getHSL(o, THREE.SRGBColorSpace); return o.s; };
+function ramp(stops, x) {
+  if (x <= stops[0][0]) return stops[0][1];
+  for (let i = 1; i < stops.length; i++) if (x <= stops[i][0]) {
+    const [x0, c0] = stops[i - 1], [x1, c1] = stops[i];
+    return mix(c0, c1, (x - x0) / (x1 - x0));
+  }
+  return stops[stops.length - 1][1];
+}
+const SKIN_RAMP = [[0.35, '#6b4430'], [0.5, '#9a6a4f'], [0.62, '#c08a6f'], [0.72, '#d9a68f'], [0.82, '#f0c6b4'], [0.9, '#f8dccf']];
+const HAIR_RAMP = [[0.15, '#231a16'], [0.3, '#4a3428'], [0.45, '#7a5a3e'], [0.6, '#a88458'], [0.75, '#d2b585']];
+function colouriseMono(c, seed) {
+  const r = rng(seed);
+  const out = { ...c };
+  if (c.skinBright || c.skin) out.skinBright = out.skin = ramp(SKIN_RAMP, srgbLum(c.skinBright || c.skin));
+  if (c.hair) out.hair = ramp(HAIR_RAMP, srgbLum(c.hair));
+  if (c.brow) out.brow = ramp(HAIR_RAMP, srgbLum(c.brow) * 0.9);
+  out.iris = '#4a3020';
+  if (c.shirt) { const L = srgbLum(c.shirt); out.shirt = mix(SHIRTS[Math.floor(r() * SHIRTS.length)], L < 0.5 ? '#000000' : '#ffffff', Math.abs(L - 0.5) * 0.8); }
+  if (c.headwear) out.headwear = ['#c0392b', '#2e86c1', '#f1c40f', '#8e44ad'][Math.floor(r() * 4)];
+  return out;
+}
+
 export function traitsToParams(t, name = '') {
   const r = rng(hashStr(name || JSON.stringify(t.color || {})));
   const g = t.geo || {};
-  const c = t.color || {};
+  let c = t.color || {};
+  // a greyscale photo: every sampled colour has (almost) no saturation
+  const mono = [c.skinBright || c.skin, c.hair, c.iris].filter(Boolean).every((h) => srgbSat(h) < 0.06) && !!(c.skin || c.hair);
+  if (mono) c = colouriseMono(c, hashStr(name + 'mono'));
   const H = t.hair || {};
   // half-strength white balance from the eye whites
   const wb = [1, 1, 1]; // eye-white balance measured (t.wb) but sclera is too pink to trust
@@ -101,6 +129,7 @@ export function traitsToParams(t, name = '') {
     : tidy(rawHair, { lift: -0.04, sat: 1.1, minL: 0.06, maxL: 0.8 });
   return {
     name,
+    mono,
     kid,
     skin,
     hair: hairCol,
