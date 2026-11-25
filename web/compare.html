@@ -39,7 +39,7 @@ const sun = new THREE.DirectionalLight('#fff1dc', 1.5); sun.position.set(3, 6, 6
 const cam = new THREE.PerspectiveCamera(24, 1, 0.1, 50);
 const only = QS.get('only') ? QS.get('only').split(',') : null;
 for (const p of (Array.isArray(list) ? list : list.people).filter((p) => !only || only.includes(p.name))) {
-  const P = { ...traitsToParams(p.traits || {}, p.name), ...(p.override || {}) };
+  const P = { ...traitsToParams(p.traits || {}, p.name), style: QS.get('style') || 'storybook', ...(p.override || {}) };
   const av = buildAvatar(P);
   av.update(0, 0.016, {});
   scene.add(av.root);

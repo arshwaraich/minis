@@ -68,13 +68,17 @@ function ramp(stops, x) {
   return stops[stops.length - 1][1];
 }
 const SKIN_RAMP = [[0.35, '#6b4430'], [0.5, '#9a6a4f'], [0.62, '#c08a6f'], [0.72, '#d9a68f'], [0.82, '#f0c6b4'], [0.9, '#f8dccf']];
-const HAIR_RAMP = [[0.15, '#231a16'], [0.3, '#4a3428'], [0.45, '#7a5a3e'], [0.6, '#a88458'], [0.75, '#d2b585']];
+const HAIR_REL_RAMP = [[0.38, '#1e1714'], [0.5, '#3b2a22'], [0.62, '#5e4331'], [0.76, '#8f6c49'], [0.9, '#c4a06c'], [1.05, '#dcc394']];
 function colouriseMono(c, seed) {
   const r = rng(seed);
   const out = { ...c };
-  if (c.skinBright || c.skin) out.skinBright = out.skin = ramp(SKIN_RAMP, srgbLum(c.skinBright || c.skin));
-  if (c.hair) out.hair = ramp(HAIR_RAMP, srgbLum(c.hair));
-  if (c.brow) out.brow = ramp(HAIR_RAMP, srgbLum(c.brow) * 0.9);
+  // exposure varies a lot in B&W photos, so: skin is pulled toward a medium tone (true tone
+  // can't be read from grey), and hair is judged by how dark it is *relative to the skin*
+  const skinL = srgbLum(c.skinBright || c.skin || '#b0b0b0');
+  if (c.skinBright || c.skin) out.skinBright = out.skin = ramp(SKIN_RAMP, 0.66 + (skinL - 0.66) * 0.45);
+  const rel = (h) => srgbLum(h) / Math.max(0.2, skinL);
+  if (c.hair) out.hair = ramp(HAIR_REL_RAMP, rel(c.hair));
+  if (c.brow) out.brow = ramp(HAIR_REL_RAMP, rel(c.brow) * 0.9);
   out.iris = '#4a3020';
   if (c.shirt) { const L = srgbLum(c.shirt); out.shirt = mix(SHIRTS[Math.floor(r() * SHIRTS.length)], L < 0.5 ? '#000000' : '#ffffff', Math.abs(L - 0.5) * 0.8); }
   if (c.headwear) out.headwear = ['#c0392b', '#2e86c1', '#f1c40f', '#8e44ad'][Math.floor(r() * 4)];
@@ -86,7 +90,10 @@ export function traitsToParams(t, name = '') {
   const g = t.geo || {};
   let c = t.color || {};
   // a greyscale photo: every sampled colour has (almost) no saturation
-  const mono = [c.skinBright || c.skin, c.hair, c.iris].filter(Boolean).every((h) => srgbSat(h) < 0.06) && !!(c.skin || c.hair);
+  // black-and-white photo (incl. sepia / tinted): colour fully explained by brightness (extract.js);
+  // older traits without that measure fall back to "every sampled colour is grey"
+  const mono = t.mono ? t.mono.resid < 5
+    : [c.skinBright || c.skin, c.hair, c.iris].filter(Boolean).every((h) => srgbSat(h) < 0.06) && !!(c.skin || c.hair);
   if (mono) c = colouriseMono(c, hashStr(name + 'mono'));
   const H = t.hair || {};
   // half-strength white balance from the eye whites
@@ -115,7 +122,11 @@ export function traitsToParams(t, name = '') {
   // light eyes = blue / green / grey, not merely bright brown
   const lightEyes = !!c.iris && irisHsl.l > 0.2 && ((irisHsl.h > 0.15 && irisHsl.h < 0.75 && irisHsl.s > 0.06) || irisHsl.s < 0.06);
 
-  const beardAmt = t.beard ? clamp((0.92 - Math.min(t.beard.chinSat ?? 1, t.beard.lipSat ?? 1)) / 0.15, 0, 1) : 0;
+  // facial hair: greyer than the cheeks in colour photos
+  // (B&W: shadow under the lip is as dark as stubble, so use fine-grain texture on the chin)
+  const beardAmt = !t.beard ? 0 : mono
+    ? ((t.beard.chinTex ?? 0) > 2.7 ? clamp(((t.beard.chinTex ?? 0) - 2.2) / 2.5, 0.35, 1) : 0)
+    : clamp((0.92 - Math.min(t.beard.chinSat ?? 1, t.beard.lipSat ?? 1)) / 0.15, 0, 1);
   const glassesOn = !!t.glasses && ((t.glasses.seg ?? 0) > 0.03 || (t.glasses.score ?? 0) > 0.95);
 
   const skin = tidy((c.skinBright && c.skin ? mix(c.skinBright, c.skin, 0.45) : c.skinBright || c.skin) || '#e8b99a', { lift: 0.0, sat: 1.0, minL: 0.25, maxL: 0.88 });

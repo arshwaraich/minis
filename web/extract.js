@@ -63,6 +63,37 @@ export async function extractTraits(src, opts = {}) {
   ctx.drawImage(img, 0, 0, w, h);
   const px = ctx.getImageData(0, 0, w, h).data;
 
+  // Is this a black-and-white photo (possibly tinted: sepia, cool, warm)? In such a photo every
+  // pixel's colour is a function of its brightness alone. Fit chroma ~ quadratic(brightness) and
+  // measure what's left over; colour photos leave a lot (skin vs clothes vs background).
+  const monoResid = (() => {
+    const n = 7; // [1,Y,Y^2] normal equations for cb and cr
+    const A = new Float64Array(9), bcb = new Float64Array(3), bcr = new Float64Array(3);
+    const samples = [];
+    const stepPx = Math.max(1, Math.round(Math.sqrt((w * h) / 20000)));
+    for (let y = 0; y < h; y += stepPx) for (let x = 0; x < w; x += stepPx) {
+      const i = (y * w + x) * 4, r = px[i], g = px[i + 1], b = px[i + 2];
+      const Y = (0.299 * r + 0.587 * g + 0.114 * b) / 255, cb = b - Y * 255, cr = r - Y * 255;
+      const f = [1, Y, Y * Y];
+      for (let a = 0; a < 3; a++) { bcb[a] += f[a] * cb; bcr[a] += f[a] * cr; for (let c = 0; c < 3; c++) A[a * 3 + c] += f[a] * f[c]; }
+      samples.push(Y, cb, cr);
+    }
+    const solve = (M, v) => { // 3x3 Cramer's rule with a little ridge for stability
+      const m = Array.from(M); m[0] += 1e-6; m[4] += 1e-6; m[8] += 1e-6;
+      const det = (q) => q[0] * (q[4] * q[8] - q[5] * q[7]) - q[1] * (q[3] * q[8] - q[5] * q[6]) + q[2] * (q[3] * q[7] - q[4] * q[6]);
+      const D = det(m);
+      return [0, 1, 2].map((k) => { const q = m.slice(); for (let r = 0; r < 3; r++) q[r * 3 + k] = v[r]; return det(q) / D; });
+    };
+    const kb = solve(A, bcb), kr = solve(A, bcr);
+    let ss = 0;
+    for (let i = 0; i < samples.length; i += 3) {
+      const Y = samples[i];
+      const eb = samples[i + 1] - (kb[0] + kb[1] * Y + kb[2] * Y * Y), er = samples[i + 2] - (kr[0] + kr[1] * Y + kr[2] * Y * Y);
+      ss += eb * eb + er * er;
+    }
+    return Math.sqrt(ss / (samples.length / 3));
+  })();
+
   const { face, seg } = await loadTasks();
   const fr = face.detect(cv);
   if (!fr.faceLandmarks || !fr.faceLandmarks.length) throw new Error('no face found');
@@ -261,6 +292,24 @@ export async function extractTraits(src, opts = {}) {
   const chinC = lmPatch([199, 200, 175], 0.03);
   const sat = (c) => (c ? (Math.max(...c) - Math.min(...c)) / Math.max(1, Math.max(...c)) : NaN);
   const cheekC = lmPatch([50, 280], 0.04), philC = lmPatch([164], 0.02);
+  // fine-grain texture (stubble is speckle, shadow is smooth): mean |laplacian| / brightness
+  const texAt = (idx, r) => {
+    let sum = 0, n = 0, lsum = 0;
+    const k = Math.max(1, Math.round(W / 220));
+    for (const id of idx) {
+      const [u0, v0] = F(id);
+      for (let a = -6; a <= 6; a++) for (let b = -6; b <= 6; b++) {
+        if (a * a + b * b > 36) continue;
+        const [x, y] = fromF(u0 + (a / 6) * r, v0 + (b / 6) * r);
+        if (x < k || y < k || x >= w - k || y >= h - k) continue;
+        const g0 = grayAt(x, y);
+        sum += Math.abs(4 * g0 - grayAt(x - k, y) - grayAt(x + k, y) - grayAt(x, y - k) - grayAt(x, y + k));
+        lsum += g0; n++;
+      }
+    }
+    return n ? sum / n / Math.max(20, lsum / n) : NaN;
+  };
+  const texCheek = texAt([50, 280, 101, 330], 0.04);
 
   // ---- glasses: sharp dark valleys where frames would sit, skin should be smooth there
   function valley(u0, v0, u1, v1) {
@@ -337,6 +386,7 @@ export async function extractTraits(src, opts = {}) {
   return {
     debug,
     v: 2,
+    mono: { resid: +monoResid.toFixed(2) },
     geo,
     brows: brows.map((b, i) => ({ u: i === 0 ? Math.sign(F(33)[0]) : Math.sign(F(263)[0]), pts: b.pts })),
     wb,
@@ -369,7 +419,7 @@ export async function extractTraits(src, opts = {}) {
       crownHw: crownN ? crownHw / crownN : 0,
       hwArea: hwAcc * step * step / (W * W),
     },
-    beard: { chin: chinY / cheekY, jaw: jawY / cheekY, lip: philY / cheekY, chinSat: sat(chinC) / sat(cheekC), lipSat: sat(philC) / sat(cheekC) },
+    beard: { chin: chinY / cheekY, jaw: jawY / cheekY, lip: philY / cheekY, chinSat: sat(chinC) / sat(cheekC), lipSat: sat(philC) / sat(cheekC), chinTex: texAt([199, 200, 175, 18], 0.03) / texCheek, lipTex: texAt([164, 167, 393], 0.02) / texCheek },
     glasses: { score: glassesScore, seg: eyeN ? eyeAcc / eyeN : 0, parts: gp, lens: lensY / cheekY, w: glDims.length ? median(glDims.map((d) => d[0])) : 0, h: glDims.length ? median(glDims.map((d) => d[1])) : 0 },
     earrings: earN5 ? earRingN / earN5 : 0,
   };
