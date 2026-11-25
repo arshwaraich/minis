@@ -4,6 +4,8 @@
 
 import * as THREE from 'three';
 import { paint, paintTex, paintHair, setBand, outlineMat } from './style.js';
+import { MarchingCubes } from 'three/addons/MarchingCubes.js';
+import { mergeVertices } from 'three/addons/BufferGeometryUtils.js';
 
 // ---------------------------------------------------------------- helpers
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -327,7 +329,166 @@ function hairShell(P, F, spec) {
   return [g, rim];
 }
 
+// ---------------------------------------------------------------- sculpted (clay) hair
+// Hair as one signed-distance field: a skull cap, side curtains, fringe clumps and curls
+// blended with smooth-min like soft clay, the face carved away below the hairline,
+// then meshed with marching cubes. Head-local units (head radius ~1, face toward +z).
+const smin = (a, b, k) => { const h = Math.max(k - Math.abs(a - b), 0) / k; return Math.min(a, b) - h * h * k * 0.25; };
+const smax = (a, b, k) => -smin(-a, -b, k);
+function sdEll(x, y, z, cx, cy, cz, rx, ry, rz) {
+  const px = (x - cx) / rx, py = (y - cy) / ry, pz = (z - cz) / rz;
+  const k0 = Math.hypot(px, py, pz), k1 = Math.hypot(px / rx, py / ry, pz / rz);
+  return k1 > 1e-6 ? (k0 * (k0 - 1)) / k1 : -Math.min(rx, ry, rz);
+}
+function sdCone(x, y, z, a, b, r1, r2) {
+  const bx = b[0] - a[0], by = b[1] - a[1], bz = b[2] - a[2];
+  const px = x - a[0], py = y - a[1], pz = z - a[2];
+  const t = clamp((px * bx + py * by + pz * bz) / (bx * bx + by * by + bz * bz), 0, 1);
+  return Math.hypot(px - bx * t, py - by * t, pz - bz * t) - lerp(r1, r2, t);
+}
+let MC = null;
+function sculptHairGeometry(P) {
+  const len = P.hairLength, sx = P.sx, sy = P.sy;
+  const t = 0.09 + P.volume * 0.08 + (P.curly ? 0.03 : 0);
+  const r = rng(hashStr((P.name || '') + 'clay'));
+  // face surface z at (x, y) on the front of the head, plus an offset
+  const faceZ = (x, y, off) => 0.96 * Math.sqrt(Math.max(0.02, 1 - (x / sx) ** 2 - (y / sy) ** 2)) + off;
+  const part = P.part;
+  const hl = (x) => P.bangs ? 0.16 * sy + 0.03 * Math.cos(x * 13)
+    : (len === 'short' ? 0.5 : 0.46) * sy + 0.1 * part * x - 0.06 * Math.max(0, -part * x);
+  const yEnd = len === 'short' ? -0.15 * sy : len === 'medium' ? -lerp(0.55, 1.05, clamp((P.sideLen - 0.5) / 0.7, 0, 1)) * sy : -2.1 * sy;
+
+  // fringe clumps (tapered cones from the crown down to the hairline)
+  const locks = [];
+  if (!P.recede) {
+    if (P.bangs) {
+      for (let i = 0; i < 6; i++) {
+        const x = lerp(-0.62, 0.62, i / 5) * sx;
+        locks.push([[x * 0.6, 0.85 * sy, 0.45], [x, hl(x) + 0.03, faceZ(x, hl(x), 0.07)], 0.2, 0.085]);
+      }
+    } else {
+      const n = len === 'short' ? 5 : 4;
+      for (let i = 0; i < n; i++) {
+        const x0 = lerp(-0.55, 0.55, i / (n - 1)) * sx;
+        const x1 = x0 - part * 0.22, y1 = hl(x1) - 0.02;
+        locks.push([[part * 0.2 + x0 * 0.4, 0.95 * sy, 0.3], [x1, y1, faceZ(x1, y1, 0.08)], 0.22, 0.07]);
+      }
+    }
+  }
+  if (len !== 'short') {
+    for (const sd of [-1, 1]) for (let k = 0; k < 2; k++) {
+      const x = sd * (0.86 + k * 0.14) * sx;
+      locks.push([[x * 0.95, 0.35 * sy, 0.35 - k * 0.3], [x * (1.04 + k * 0.03), yEnd + 0.12, 0.25 - k * 0.3], 0.2, 0.13]);
+    }
+  }
+  // curls / tousled lumps over the cap
+  const lumps = [];
+  const nl = P.curly ? 48 : Math.round(P.messy * 12);
+  for (let i = 0; i < nl; i++) {
+    const th = Math.acos(1 - r() * 1.15), ph = r() * Math.PI * 2;
+    const dx = Math.sin(th) * Math.sin(ph), dy = Math.cos(th), dz = Math.sin(th) * Math.cos(ph);
+    if (dz > 0.4 && dy < 0.45) continue; // keep the forehead clear
+    lumps.push([dx * (sx + t * 0.7), 0.04 + dy * (sy + t * 0.8 + 0.04), -0.05 + dz * (0.97 + t * 0.5), P.curly ? 0.12 + r() * 0.05 : 0.1 + r() * 0.04]);
+  }
+
+  const sdf = (x, y, z) => {
+    let d = sdEll(x, y, z, 0, 0.05, -0.05, sx * (1 + t * 0.85), sy * (1 + t) + 0.05, 0.97 + t * 0.55);
+    if (len !== 'short') {
+      // side/back curtain: a rounded column hanging from the cap
+      const ax = sx * (1.0 + t * 0.45) * (1 + 0.05 * Math.min(0, y)), az = 0.96 + t * 0.45;
+      let c = (Math.hypot(x / ax, (z + 0.06) / az) - 1) * Math.min(ax, az);
+      c = smax(c, yEnd - y, 0.18);
+      c = smax(c, y - 0.4, 0.2);
+      d = smin(d, c, 0.2);
+    }
+    for (const [a, b, r1, r2] of locks) d = smin(d, sdCone(x, y, z, a, b, r1, r2), 0.06);
+    for (const [cx, cy, cz, rr] of lumps) d = smin(d, Math.hypot(x - cx, y - cy, z - cz) - rr, 0.05);
+    if (len === 'short') {
+      // trim above the ears at the sides, lower at the nape
+      const back = clamp((0.25 - z) / 1.1, 0, 1);
+      const yl = lerp(-0.02 * sy, -0.62 * sy, back);
+      d = smax(d, yl - y, 0.08);
+    }
+    if (P.recede) d = smax(d, -sdEll(x, y, z, 0, 0.78 * sy, 0.25, 0.62 * sx, 0.42 + 0.25 * P.recede, 0.95), 0.08);
+    // carve the face away below the hairline
+    // rounded oval opening: wide at the cheeks, closing in under the chin
+    const fw = (len === 'short' ? 1.0 : 0.82) * sx, fyc = -0.35 * sy, fh = 1.25 * sy;
+    const oval = (Math.hypot(x / fw, (y - fyc) / fh) - 1) * Math.min(fw, fh);
+    const face = smax(smax(oval, y - hl(x), 0.12), 0.05 - z, 0.1);
+    d = smax(d, -face, 0.1);
+    return d;
+  };
+
+  const RES = 88;
+  const X0 = -1.7, X1 = 1.7, Y1 = 1.75, Y0 = Math.min(-0.9, yEnd - 0.35), Z0 = -1.7, Z1 = 1.7;
+  if (!MC) MC = new MarchingCubes(RES, new THREE.MeshBasicMaterial(), false, false, 160000);
+  MC.reset();
+  MC.isolation = 0;
+  const f = MC.field, N = MC.size;
+  for (let k = 0; k < N; k++) {
+    const z = Z0 + (Z1 - Z0) * (k / (N - 1));
+    for (let j = 0; j < N; j++) {
+      const y = Y0 + (Y1 - Y0) * (j / (N - 1));
+      for (let i = 0; i < N; i++) {
+        // keep the grid border empty so every surface closes
+        const edge = i === 0 || j === 0 || k === 0 || i === N - 1 || j === N - 1 || k === N - 1;
+        f[k * N * N + j * N + i] = edge ? -1 : -sdf(X0 + (X1 - X0) * (i / (N - 1)), y, z);
+      }
+    }
+  }
+  MC.update();
+  const n = MC.count;
+  const pos = new Float32Array(n * 3);
+  const src = MC.positionArray;
+  for (let v = 0; v < n; v++) {
+    // MarchingCubes lays its grid over [-1, 1]; map back to head space
+    pos[v * 3] = X0 + (X1 - X0) * (src[v * 3] + 1) / 2;
+    pos[v * 3 + 1] = Y0 + (Y1 - Y0) * (src[v * 3 + 1] + 1) / 2;
+    pos[v * 3 + 2] = Z0 + (Z1 - Z0) * (src[v * 3 + 2] + 1) / 2;
+  }
+  let g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g = mergeVertices(g, 1e-4);
+  g.computeVertexNormals();
+  return g;
+}
+
+function buildHeadwear(P, F, grp, rf = () => 1.12 + P.volume * 0.12 + (P.curly ? 0.04 : 0)) {
+    const bm = soft(P.headwear, { rough: 0.7, rim: 0.25 });
+    const pts = [];
+    for (let i = 0; i < 64; i++) {
+      const phi = (i / 64) * Math.PI * 2, c = Math.cos(phi);
+      const th = lerp(1.15, 0.72, (c + 1) / 2);
+      pts.push(F.hp(th, phi, rf(th, phi) + 0.05));
+    }
+    grp.add(mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, true), 96, 0.085, 10, true), bm));
+    // bow
+    const knot = new THREE.Group();
+    const k1 = mesh(SPHERE(), bm); k1.scale.setScalar(0.1);
+    for (const sd of [-1, 1]) {
+      const loop = mesh(SPHERE(), bm);
+      loop.scale.set(0.2, 0.12, 0.07);
+      loop.position.set(sd * 0.17, 0.02, 0);
+      loop.rotation.z = sd * 0.35;
+      knot.add(loop);
+    }
+    knot.add(k1);
+    const s = F.hp(0.95, -0.95, rf(0.95, -0.95) + 0.1);
+    knot.position.copy(s);
+    knot.quaternion.setFromUnitVectors(Z, s.clone().normalize());
+    grp.add(knot);
+}
+
+function buildClayHair(P, F, grp) {
+  grp.add(mesh(sculptHairGeometry(P), soft(P.hair, { gloss: 1, rim: 0.12 })));
+}
+
 function buildHair(P, F, grp) {
+  if (P.clay !== false) {
+    buildClayHair(P, F, grp);
+    if (P.headwear) buildHeadwear(P, F, grp);
+    return;
+  }
   const len = P.hairLength;
   const hm = paintHair(P.hair, strandTex(), { side: THREE.DoubleSide });
   const base = (len === 'short' ? 1.05 : 1.065) + P.volume * 0.06;
@@ -400,31 +561,7 @@ function buildHair(P, F, grp) {
     const top = F.hp(0, 0, base + 0.06);
     lock([top.clone().add(V(0, -0.1, 0)), top.clone().add(V(0.02, 0.18, 0.02)), top.clone().add(V(0.14, 0.3, -0.02)), top.clone().add(V(0.24, 0.22, -0.05))], 0.08, { flat: 0.8, belly: 0 });
   }
-  if (P.headwear) {
-    const bm = soft(P.headwear, { rough: 0.7, rim: 0.25 });
-    const pts = [];
-    for (let i = 0; i < 64; i++) {
-      const phi = (i / 64) * Math.PI * 2, c = Math.cos(phi);
-      const th = lerp(1.15, 0.72, (c + 1) / 2);
-      pts.push(F.hp(th, phi, rf(th, phi) + 0.05));
-    }
-    grp.add(mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, true), 96, 0.085, 10, true), bm));
-    // bow
-    const knot = new THREE.Group();
-    const k1 = mesh(SPHERE(), bm); k1.scale.setScalar(0.1);
-    for (const sd of [-1, 1]) {
-      const loop = mesh(SPHERE(), bm);
-      loop.scale.set(0.2, 0.12, 0.07);
-      loop.position.set(sd * 0.17, 0.02, 0);
-      loop.rotation.z = sd * 0.35;
-      knot.add(loop);
-    }
-    knot.add(k1);
-    const s = F.hp(0.95, -0.95, rf(0.95, -0.95) + 0.1);
-    knot.position.copy(s);
-    knot.quaternion.setFromUnitVectors(Z, s.clone().normalize());
-    grp.add(knot);
-  }
+  if (P.headwear) buildHeadwear(P, F, grp, rf);
 }
 
 // ---------------------------------------------------------------- face

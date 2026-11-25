@@ -3,7 +3,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Minis · style board</title>
-<script type="importmap">{ "imports": { "three": "./vendor/three/three.webgpu.min.js", "three/webgpu": "./vendor/three/three.webgpu.min.js", "three/tsl": "./vendor/three/three.tsl.min.js" } }</script>
+<script type="importmap">{ "imports": { "three": "./vendor/three/three.webgpu.min.js", "three/webgpu": "./vendor/three/three.webgpu.min.js", "three/tsl": "./vendor/three/three.tsl.min.js", "three/addons/": "./vendor/three/addons/" } }</script>
 <style>
   body { margin: 0; background: #f3efe6; font: 14px/1.3 ui-rounded, system-ui, sans-serif; color: #2b2a33; }
   header { padding: 14px 16px 2px; display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
@@ -54,9 +54,11 @@ function shot(P, style, mode) {
   cam.aspect = w / h; cam.updateProjectionMatrix();
   const fov = THREE.MathUtils.degToRad(cam.fov);
   if (mode === 'full') {
+    // frame feet to head-top (ignores any stray bounds)
+    const top = av.root.userData.headTopY, mid = top / 2;
     const hfov = 2 * Math.atan(Math.tan(fov / 2) * cam.aspect);
-    const dist = Math.max((sz.y * 1.12) / 2 / Math.tan(fov / 2), (Math.max(sz.x, sz.z) * 1.15) / 2 / Math.tan(hfov / 2)) + sz.z / 2;
-    cam.position.set(0, c.y + sz.y * 0.05, dist); cam.lookAt(0, c.y, 0);
+    const dist = Math.max((top * 1.15) / 2 / Math.tan(fov / 2), 2.4 / 2 / Math.tan(hfov / 2)) + 1;
+    cam.position.set(0, mid + top * 0.05, dist); cam.lookAt(0, mid, 0);
   } else {
     const hy = av.root.userData.headCenterY, span = 2.6;
     const dist = span / 2 / Math.tan(fov / 2);

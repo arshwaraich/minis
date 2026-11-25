@@ -50,7 +50,7 @@ export function litNode(base, kind = 'default', { rim = 0.16, ring = 0, ringColo
   if (ring) {
     // painted highlight band, crisp edges, only where the key light reaches
     const ny = normalView.y;
-    const r = smoothstep(0.42, 0.5, ny).mul(float(1).sub(smoothstep(0.66, 0.74, ny))).mul(band);
+    const r = smoothstep(0.38, 0.52, ny).mul(float(1).sub(smoothstep(0.64, 0.8, ny))).mul(band);
     c = mix(c, ringColor, r.mul(ring));
   }
   return c;
@@ -70,7 +70,7 @@ export function paint(hex, kind = 'default', opts = {}) {
     hc.setHSL(hsl.h, Math.min(1, hsl.s * 0.9), Math.min(0.92, hsl.l + 0.22 + (1 - hsl.l) * 0.08), THREE.SRGBColorSpace);
     ringColor = color('#' + hc.getHexString());
   }
-  m.colorNode = litNode(base, kind, { ...opts, ringColor });
+  m.colorNode = litNode(base, kind, { ...opts, ring: opts.ring ? opts.ring * 0.7 : 0, ringColor });
   if (opts.side) m.side = opts.side;
   if (opts.transparent) { m.transparent = true; m.opacity = opts.opacity ?? 1; m.depthWrite = false; }
   cache.set(key, m);
