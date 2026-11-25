@@ -54,3 +54,14 @@ Dev: `web/compare.html?size=900&only=Name1,Name2` for large closeups. `web/compa
 (headless can't capture WebGPU canvases; use `?gl=1` for screenshots).
 
 Test faces in web/people/ are AI-generated (thispersondoesnotexist.com); not real people.
+
+## Running it
+It's a static site: serve `web/` with any static server (e.g. `python3 -m http.server -d web`)
+and open it. No backend. Photos added with **+** are read in the browser and kept in that
+browser's localStorage. `deploy.sh` is this server's rsync-to-nginx step.
+
+## Credits & licences
+Code in this repo: MIT (see LICENSE). Vendored in `web/vendor/` and `web/models/`:
+[three.js](https://github.com/mrdoob/three.js) (MIT), and
+[MediaPipe Tasks Vision](https://github.com/google-ai-edge/mediapipe) with its face landmarker
+and selfie multiclass segmenter models (Apache 2.0).
