@@ -4,15 +4,13 @@ import { CSS2DRenderer, CSS2DObject } from 'three/addons/CSS2DRenderer.js';
 import { traitsToParams, buildAvatar, blobShadowMaterial, STYLES } from './avatar.js';
 import { traitLabels } from './labels.js';
 import { paint } from './style.js';
-import { buildStandee } from './standee.js';
 
 const qs = new URLSearchParams(location.search);
 const $ = (s) => document.querySelector(s);
 const LOCAL_KEY = 'minis.added.v1';
-const STYLE_OPTS = { illustrated: 'Illustrated (AI, flat)', ...Object.fromEntries(Object.entries(STYLES).map(([k, v]) => [k, v.label])) };
+const STYLE_OPTS = Object.fromEntries(Object.entries(STYLES).map(([k, v]) => [k, v.label]));
 const pickStyle = (v) => (v && STYLE_OPTS[v] ? v : null);
 const STYLE = pickStyle(qs.get('style')) || pickStyle(localStorage.getItem('minis.style')) || 'sprout';
-const MESH_STYLE = STYLES[STYLE] ? STYLE : 'sprout'; // fallback for people without an illustration
 
 // ------------------------------------------------------------------ renderer
 const renderer = new THREE.WebGPURenderer({ antialias: true, alpha: true, forceWebGL: qs.has('gl') });
@@ -142,8 +140,8 @@ function islandRadius(n) {
 }
 
 function addPerson(person, traits) {
-  const params = { ...traitsToParams(traits || {}, person.name), style: MESH_STYLE, ...(person.override || {}) };
-  const av = STYLE === 'illustrated' && person.sprite ? buildStandee(person.sprite, params) : buildAvatar(params);
+  const params = { ...traitsToParams(traits || {}, person.name), style: STYLE, ...(person.override || {}) };
+  const av = buildAvatar(params);
   const i = crowd.length;
   const home = homeFor(i);
   av.root.position.copy(home);
