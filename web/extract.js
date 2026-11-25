@@ -4,6 +4,7 @@
 // Output is raw, face-normalised measurements + colours; avatar.js turns them
 // into a character, so mapping can be retuned without re-running the models.
 
+import { TRAITS_VERSION } from './version.js';
 import { FilesetResolver, FaceLandmarker, ImageSegmenter } from './vendor/mediapipe/vision_bundle.js';
 
 const BASE = new URL('.', import.meta.url).href;
@@ -385,7 +386,7 @@ export async function extractTraits(src, opts = {}) {
   }
   return {
     debug,
-    v: 2,
+    v: TRAITS_VERSION,
     mono: { resid: +monoResid.toFixed(2) },
     geo,
     brows: brows.map((b, i) => ({ u: i === 0 ? Math.sign(F(33)[0]) : Math.sign(F(263)[0]), pts: b.pts })),

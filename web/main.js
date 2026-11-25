@@ -3,6 +3,7 @@ import { OrbitControls } from 'three/addons/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/CSS2DRenderer.js';
 import { traitsToParams, buildAvatar, blobShadowMaterial, STYLES } from './avatar.js';
 import { paint } from './style.js';
+import { TRAITS_VERSION } from './version.js';
 
 const qs = new URLSearchParams(location.search);
 const $ = (s) => document.querySelector(s);
@@ -41,7 +42,9 @@ scene.add(sun, sun.target);
 // ------------------------------------------------------------------ island
 const island = new THREE.Group();
 scene.add(island);
+let islandR = 0;
 function buildIsland(R) {
+  islandR = R;
   island.clear();
   const M = (c, kind = 'ground') => paint(c, kind, { rim: 0.08 });
   // water, sand rim, grass plateau with a soft bevel
@@ -134,8 +137,9 @@ function homeFor(i) {
 }
 
 function islandRadius(n) {
-  const lineHalf = ((Math.min(n, 14) - 1) * LINE.SX) / 2;
-  return Math.max(5, SPACING * Math.sqrt(Math.max(1, n - 1)) * 0.95 + 2.6, lineHalf + 2.6);
+  // big enough for the starting crowd and for the full queue + done formation (+ margin, and
+  // clear of the trees that ring the back edge)
+  return Math.max(5, SPACING * Math.sqrt(Math.max(1, n - 1)) * 0.95 + 2.6, layoutGeometry(n).reach + 2.8);
 }
 
 function addPerson(person, traits) {
@@ -202,19 +206,24 @@ function slotAt(k, G, zRow0, dir) {
   const row = Math.floor(k / G.perRow), col = k % G.perRow;
   return new THREE.Vector3((col - (G.perRow - 1) / 2) * G.SX, 0, zRow0 + dir * row * G.SZ);
 }
-function layoutGeometry() {
-  const N = crowd.length, perRow = perRowFor(N);
+function layoutGeometry(N = crowd.length) {
+  const perRow = perRowFor(N);
   // several rows (phones): wider spacing so the walking lanes between rows and the
   // gaps between columns stay a full body-width away from anyone standing
   const multi = perRow < N;
   const SX = multi ? 2.0 : LINE.SX, SZ = multi ? 3.2 : LINE.SZ;
   const RQ = Math.ceil(N / perRow);
+  // Centre the whole formation on the island: the queue rows in front plus room for the
+  // done rows behind if *everyone* were done, so nobody ends up past the island's edge.
+  const depth = (2 * RQ - 1) * SZ + 0.4;      // first queue row to last possible done row
+  const zFront = depth / 2;
   // queue rows: head row furthest back (so reading order top-left first = queue order)
-  const queueRow0 = LINE.Z0 - (RQ - 1) * SZ;
+  const queueRow0 = zFront - (RQ - 1) * SZ;
   const doneRow0 = queueRow0 - SZ - 0.4;
   const RD = Math.ceil(doneOrder.length / perRow);
-  const zc = (LINE.Z0 + queueRow0) / 2;
-  return { N, perRow, RQ, RD, queueRow0, doneRow0, SX, SZ, multi, zc };
+  const zc = (zFront + queueRow0) / 2;
+  const reach = Math.hypot(((perRow - 1) * SX) / 2, depth / 2); // farthest slot from the centre
+  return { N, perRow, RQ, RD, queueRow0, doneRow0, SX, SZ, multi, zc, reach };
 }
 
 function frameAll(ext, dur = 1.6) {
@@ -261,6 +270,8 @@ function refreshLabels() {
 // Send everyone to their slot. lanes=true: horizontal movers walk around via front/back lanes.
 function arrange({ lanes = false } = {}) {
   const G = layoutGeometry();
+  const needR = islandRadius(crowd.length);
+  if (Math.abs(needR - islandR) > 0.01) buildIsland(needR);
   const queue = order.filter((i) => !done.has(i));
   const plan = new Map();
   queue.forEach((ci, k) => plan.set(ci, slotAt(k, G, G.queueRow0, +1)));
@@ -416,14 +427,18 @@ async function loadList() {
   const all = [...list, ...added];
   $('#count').textContent = all.length;
   const pending = [];
+  // people saved on this device with traits from an older version of the photo reader get
+  // re-read from their stored photo (e.g. black-and-white detection came later)
+  const stale = (p) => added.includes(p) && p.image && (!p.traits || (p.traits.v || 0) < TRAITS_VERSION);
   for (const p of all) {
-    if (p.traits || !p.image) addPerson(p, p.traits || null);
-    else pending.push(p);
+    if ((p.traits || !p.image) && !stale(p)) addPerson(p, p.traits || null);
+    else { if (stale(p)) delete p.traits; pending.push(p); }
   }
   if (pending.length) toast(`Reading ${pending.length} photo${pending.length > 1 ? 's' : ''}…`, true);
   for (const p of pending) {
     let t = null;
     try { t = await traitsFor(p); } catch (e) { console.warn(p.name, e); }
+    if (t && added.includes(p)) { p.traits = t; try { localStorage.setItem(LOCAL_KEY, JSON.stringify(added)); } catch {} }
     addPerson(p, t);
   }
   if (pending.length) toast('');

@@ -3,7 +3,7 @@
   "name": "Leo",
   "image": "people/p1.jpg",
   "traits": {
-   "v": 2,
+   "v": 3,
    "mono": {
     "resid": 19.73
    },
@@ -152,7 +152,7 @@
   "name": "Mei",
   "image": "people/p2.jpg",
   "traits": {
-   "v": 2,
+   "v": 3,
    "mono": {
     "resid": 17.14
    },
@@ -301,7 +301,7 @@
   "name": "Tom",
   "image": "people/p3.jpg",
   "traits": {
-   "v": 2,
+   "v": 3,
    "mono": {
     "resid": 18.89
    },
@@ -450,7 +450,7 @@
   "name": "Gerald",
   "image": "people/p4.jpg",
   "traits": {
-   "v": 2,
+   "v": 3,
    "mono": {
     "resid": 15.14
    },
@@ -599,7 +599,7 @@
   "name": "Sam",
   "image": "people/p5.jpg",
   "traits": {
-   "v": 2,
+   "v": 3,
    "mono": {
     "resid": 22.75
    },
@@ -748,7 +748,7 @@
   "name": "Lucía",
   "image": "people/p6.jpg",
   "traits": {
-   "v": 2,
+   "v": 3,
    "mono": {
     "resid": 15.45
    },
@@ -897,7 +897,7 @@
   "name": "Nadia",
   "image": "people/p7.jpg",
   "traits": {
-   "v": 2,
+   "v": 3,
    "mono": {
     "resid": 18.1
    },
@@ -1046,7 +1046,7 @@
   "name": "Marco",
   "image": "people/p8.jpg",
   "traits": {
-   "v": 2,
+   "v": 3,
    "mono": {
     "resid": 10.47
    },
@@ -1195,7 +1195,7 @@
   "name": "Andrés",
   "image": "people/p9.jpg",
   "traits": {
-   "v": 2,
+   "v": 3,
    "mono": {
     "resid": 8.25
    },
@@ -1344,7 +1344,7 @@
   "name": "Ben",
   "image": "people/p10.jpg",
   "traits": {
-   "v": 2,
+   "v": 3,
    "mono": {
     "resid": 18.14
    },
@@ -1493,7 +1493,7 @@
   "name": "Clara",
   "image": "people/p11.jpg",
   "traits": {
-   "v": 2,
+   "v": 3,
    "mono": {
     "resid": 16.34
    },
@@ -1642,7 +1642,7 @@
   "name": "Dev",
   "image": "people/p12.jpg",
   "traits": {
-   "v": 2,
+   "v": 3,
    "mono": {
     "resid": 10.64
    },
