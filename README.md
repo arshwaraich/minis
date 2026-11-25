@@ -2,7 +2,6 @@
 
 A cute 3D queue of people generated from their photos: a replacement for an ordered checklist.
 
-
 ## How it works
 1. **extract.js** (in the browser): MediaPipe FaceLandmarker (478 pts + blendshapes) and the
    multiclass selfie segmenter (hair / face skin / body skin / clothes / accessories) turn a photo into
