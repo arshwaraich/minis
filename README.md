@@ -18,6 +18,14 @@ Cute chibi island folks generated from photos.
    wandering/idle animation, CSS2D name labels, click for photo + traits, "+ Add" to make one from a
    local photo or image URL (stored in localStorage on that device only).
 
+## Line-up / shuffle
+On load the crowd forms a line facing the camera in a fresh random order (rows of 4 on portrait
+phones); each label shows the position number. **Shuffle** picks a new order and everyone walks to
+their spot: people moving right step out in front of the line, people moving left step out behind
+it, longer trips further out, so they pass instead of colliding. The camera glides to frame the
+line. `window.__minis.simulate(dt)` advances the simulation without rendering
+(`tools/shuffle_test.mjs` uses it, since headless software rendering runs at about 2 fps).
+
 ## Data
 `web/people.json`: `[{ "name": "...", "image": "people/x.jpg" | "https://...", "traits"?: {...}, "override"?: {...} }]`.
 Load another list with `?src=<url>` (needs CORS on the JSON and images). Entries without `traits`

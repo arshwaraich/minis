@@ -1,0 +1,17 @@
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const { chromium } = require('playwright');
+const [w = 1280, h = 800, out = '/tmp/ln'] = process.argv.slice(2);
+const b = await chromium.launch();
+const p = await b.newPage({ viewport: { width: +w, height: +h } });
+p.on('pageerror', (e) => console.error('[pageerror]', e.message));
+await p.goto('http://127.0.0.1:8765/?gl=1');
+await p.waitForSelector('body.ready', { timeout: 120000 });
+await p.waitForFunction(() => window.__minis.order.length > 0, null, { timeout: 60000 });
+const ff = (sec) => p.evaluate((sec) => { for (let i = 0; i < sec / 0.05; i++) window.__minis.simulate(0.05); }, sec);
+const stat = () => p.evaluate(() => { const m = window.__minis; let maxd = 0, w = 0; for (const c of m.crowd) { const d = c.av.root.position.distanceTo(c.target); maxd = Math.max(maxd, d); if (c.path.length || d > 0.05) w++; } return { maxd: +maxd.toFixed(2), walking: w, order: m.order.map((i) => m.crowd[i].person.name).join(',') }; });
+await ff(12); console.log('lined', JSON.stringify(await stat())); await p.waitForTimeout(800); await p.screenshot({ path: `${out}1.png` });
+await p.click('#shuffleBtn');
+await ff(1.4); await p.waitForTimeout(800); await p.screenshot({ path: `${out}2.png` });
+await ff(12); console.log('shuffled', JSON.stringify(await stat())); await p.waitForTimeout(800); await p.screenshot({ path: `${out}3.png` });
+await b.close();

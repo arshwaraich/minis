@@ -127,6 +127,7 @@ function mulberry(a) {
 // ------------------------------------------------------------------ crowd
 const crowd = []; // {person, params, av, label, home, target, idle, speed}
 const SPACING = 2.45;
+const LINE = { SX: 1.7, SZ: 2.4, Z0: 1.4 };
 
 function homeFor(i) {
   if (i === 0) return new THREE.Vector3(0, 0, 0);
@@ -136,7 +137,8 @@ function homeFor(i) {
 }
 
 function islandRadius(n) {
-  return Math.max(5, SPACING * Math.sqrt(Math.max(1, n - 1)) * 0.95 + 2.6);
+  const lineHalf = ((Math.min(n, 14) - 1) * LINE.SX) / 2;
+  return Math.max(5, SPACING * Math.sqrt(Math.max(1, n - 1)) * 0.95 + 2.6, lineHalf + 2.6);
 }
 
 function addPerson(person, traits) {
@@ -150,14 +152,15 @@ function addPerson(person, traits) {
 
   const el = document.createElement('div');
   el.className = 'label';
-  el.textContent = person.name;
+  el.innerHTML = `<b class="n"></b><span></span>`;
+  el.lastChild.textContent = person.name;
   el.addEventListener('click', () => select(i));
   el.addEventListener('pointerenter', () => hover(i));
   const label = new CSS2DObject(el);
   label.position.set(0, av.root.userData.headTopY + 0.25, 0);
   av.root.add(label);
 
-  const c = { person, traits, params, av, el, home, target: home.clone(), idle: 1 + Math.random() * 5 };
+  const c = { person, traits, params, av, el, home, target: home.clone(), path: [], wait: 0, idle: 1 + Math.random() * 5 };
   crowd.push(c);
   layout();
   return c;
@@ -166,12 +169,101 @@ function addPerson(person, traits) {
 function layout() {
   const R = islandRadius(crowd.length);
   buildIsland(R);
-  crowd.forEach((c, i) => { c.home = homeFor(i); c.target.copy(c.home); });
+  crowd.forEach((c, i) => { c.home = homeFor(i); if (MODE === 'crowd') c.target.copy(c.home); });
+  if (MODE === 'line') {
+    // newcomers join the end of the line
+    const missing = [...crowd.keys()].filter((i) => !order.includes(i));
+    lineUp([...order, ...missing]);
+    return;
+  }
   const d = Math.max(10, R * 2.4) * (innerWidth < innerHeight ? Math.min(2.1, 0.95 * innerHeight / innerWidth) : 1);
   camera.position.set(0, d * 0.5, d);
   controls.target.set(0, 1.1, 0);
   controls.maxDistance = Math.max(45, d * 1.6);
     controls.update();
+}
+
+// ------------------------------------------------------------------ line-up & shuffle
+// The crowd forms a line facing the camera in a random order (new order on every load).
+// Shuffling walks everyone to their new spot: people moving right step out in front of
+// the line, people moving left step out behind it, so they pass instead of colliding.
+let MODE = 'crowd';
+let order = [];
+let camFly = null;
+
+function lineGeometry(n) {
+  const portrait = innerWidth < innerHeight * 0.9;
+  const perRow = Math.max(1, Math.min(n, portrait ? 4 : 14));
+  const rows = Math.ceil(n / perRow);
+  const slots = [];
+  for (let i = 0; i < n; i++) {
+    const row = Math.floor(i / perRow), col = i % perRow;
+    const inRow = row === rows - 1 ? n - row * perRow : perRow;
+    // row 0 at the back so reading order (top-left first) matches line order
+    slots.push(new THREE.Vector3((col - (inRow - 1) / 2) * LINE.SX, 0, LINE.Z0 - (rows - 1 - row) * LINE.SZ));
+  }
+  return { slots, perRow, rows };
+}
+
+function frameLine(G, dur = 1.6) {
+  const W = (G.perRow - 1) * LINE.SX + 4.2, D = (G.rows - 1) * LINE.SZ;
+  const fov = THREE.MathUtils.degToRad(camera.fov);
+  const hfov = 2 * Math.atan(Math.tan(fov / 2) * camera.aspect);
+  const multi = G.rows > 1;
+  const d = Math.max(W / 2 / Math.tan(hfov / 2), ((multi ? D * 0.95 : 0) + 5.5) / 2 / Math.tan(fov / 2), 7);
+  const tgt = new THREE.Vector3(0, multi ? 1.1 : 1.6, LINE.Z0 - D / 2);
+  // several rows: look down more steeply so back rows aren't hidden behind the front
+  const [up, back] = multi ? [0.72, 0.7] : [0.32, 0.95];
+  flyTo(new THREE.Vector3(0, tgt.y + d * up, tgt.z + d * back), tgt, dur);
+}
+function flyTo(pos, tgt, dur) {
+  camFly = { p0: camera.position.clone(), t0: controls.target.clone(), p1: pos, t1: tgt, t: 0, dur: Math.max(0.001, dur) };
+}
+
+function shuffledOrder(n, avoid) {
+  let a;
+  do {
+    a = [...Array(n).keys()];
+    for (let i = n - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  } while (n > 2 && avoid && a.every((v, i) => v === avoid[i]));
+  return a;
+}
+
+function setLabel(c, n) {
+  const b = c.el.firstChild;
+  b.textContent = n ? String(n) : '';
+  b.style.display = n ? '' : 'none';
+}
+
+function lineUp(newOrder) {
+  const prev = new Map();
+  if (MODE === 'line') order.forEach((ci, k) => prev.set(ci, k));
+  order = newOrder;
+  MODE = 'line';
+  const G = lineGeometry(order.length);
+  order.forEach((ci, k) => {
+    const c = crowd[ci], slot = G.slots[k], pos = c.av.root.position;
+    c.target = slot.clone();
+    c.path = [];
+    const dx = slot.x - pos.x;
+    if (prev.has(ci) && Math.abs(dx) > 0.3) {
+      const dir = dx > 0 ? 1 : -1;
+      const lane = dir * Math.min(2.6, 1.0 + 0.1 * Math.abs(dx)); // longer trips walk further out
+      c.path.push(new THREE.Vector3(pos.x, 0, pos.z + lane), new THREE.Vector3(slot.x, 0, slot.z + lane));
+      c.wait = Math.random() * 0.3;
+    } else {
+      c.wait = prev.has(ci) ? 0 : Math.random() * 0.9;
+    }
+    c.path.push(slot.clone());
+    setLabel(c, k + 1);
+  });
+  frameLine(G);
+}
+
+function shuffle() {
+  if (crowd.length < 2) return;
+  lineUp(shuffledOrder(crowd.length, MODE === 'line' ? order : null));
+  for (const c of crowd) if (Math.random() < 0.5) c.av.hop();
 }
 
 // ------------------------------------------------------------------ interaction
@@ -310,26 +402,40 @@ function toast(msg, sticky) {
 // ------------------------------------------------------------------ loop
 const clock = new THREE.Clock();
 const tmp = new THREE.Vector3();
+let simT = 0;
 function tick() {
-  const dt = Math.min(0.05, clock.getDelta());
-  const t = clock.elapsedTime;
+  simulate(Math.min(0.05, clock.getDelta()));
+  controls.update();
+  renderer.render(scene, camera);
+  labels.render(scene, camera);
+}
+// One simulation step (walking, idling, camera glide). Separate from rendering so
+// tests can fast-forward time on slow software-rendered browsers.
+function simulate(dt) {
+  simT += dt;
+  const t = simT;
   for (const c of crowd) {
     const root = c.av.root;
-    tmp.copy(c.target).sub(root.position);
+    if (c.wait > 0) c.wait -= dt;
+    const goal = c.path.length ? c.path[0] : c.target;
+    tmp.copy(goal).sub(root.position);
     tmp.y = 0;
     const dist = tmp.length();
     let speed = 0;
-    if (dist > 0.05) {
-      speed = Math.min(0.9, dist * 2);
-      root.position.addScaledVector(tmp.normalize(), speed * dt);
+    if (dist > 0.04 && !(c.wait > 0)) {
+      speed = MODE === 'line' ? Math.min(2.1, 0.8 + dist * 1.6) : Math.min(0.9, dist * 2);
+      root.position.addScaledVector(tmp.normalize(), Math.min(dist, speed * dt));
       const want = Math.atan2(tmp.x, tmp.z);
-      root.rotation.y = turn(root.rotation.y, want, dt * 6);
+      root.rotation.y = turn(root.rotation.y, want, dt * 8);
+    } else if (dist <= 0.04 && c.path.length) {
+      c.path.shift();
+      if (!c.path.length && MODE === 'line' && Math.random() < 0.35) c.av.hop(); // little hop on arrival
     } else {
       // idle: face the camera, sometimes wander a little
       const toCam = Math.atan2(camera.position.x - root.position.x, camera.position.z - root.position.z);
       root.rotation.y = turn(root.rotation.y, toCam, dt * 3);
       c.idle -= dt;
-      if (c.idle < 0) {
+      if (MODE === 'crowd' && c.idle < 0) {
         c.idle = 4 + Math.random() * 8;
         const a = Math.random() * Math.PI * 2, r = Math.random() * 0.6;
         c.target.set(c.home.x + Math.cos(a) * r, 0, c.home.z + Math.sin(a) * r);
@@ -343,9 +449,13 @@ function tick() {
     const pitch = -Math.atan2(camera.position.y - 2, Math.hypot(camera.position.x - root.position.x, camera.position.z - root.position.z)) * 0.5;
     c.av.update(t, dt, { speed, lookYaw: yaw, lookPitch: pitch });
   }
-  controls.update();
-  renderer.render(scene, camera);
-  labels.render(scene, camera);
+  if (camFly) {
+    camFly.t += dt;
+    const k = Math.min(1, camFly.t / camFly.dur), e = k * k * (3 - 2 * k);
+    camera.position.lerpVectors(camFly.p0, camFly.p1, e);
+    controls.target.lerpVectors(camFly.t0, camFly.t1, e);
+    if (k >= 1) camFly = null;
+  }
 }
 function turn(a, b, k) {
   let d = b - a;
@@ -359,12 +469,16 @@ addEventListener('resize', () => {
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
   labels.setSize(innerWidth, innerHeight);
+  if (MODE === 'line') { clearTimeout(window.__reflow); window.__reflow = setTimeout(() => lineUp(order), 250); }
 });
 
 const sel = $('#styleSel');
 for (const [k, v] of Object.entries(STYLE_OPTS)) sel.append(new Option(v, k, false, k === STYLE));
 sel.onchange = () => { localStorage.setItem('minis.style', sel.value); const u = new URL(location); u.searchParams.set('style', sel.value); location = u; };
 
-window.__minis = { crowd, scene, camera, renderer, select, layout };
+window.__minis = { crowd, scene, camera, renderer, select, layout, shuffle, lineUp, simulate, get order() { return order; } };
+$('#shuffleBtn').onclick = shuffle;
 await loadList();
+// start as a crowd, then form the line in a fresh random order
+setTimeout(() => { lineUp(shuffledOrder(crowd.length)); $('#shuffleBtn').disabled = false; }, 1200);
 document.body.classList.add('ready');

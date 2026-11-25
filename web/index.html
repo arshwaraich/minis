@@ -21,6 +21,10 @@
   .labels { touch-action: none; }
   .label { pointer-events: auto; cursor: pointer; background: var(--card); padding: 3px 10px; border-radius: 999px; font-weight: 700; font-size: 13px; box-shadow: 0 2px 0 rgba(0,0,0,.12); white-space: nowrap; transition: transform .15s; }
   .label.hot { transform: scale(1.15); background: #ffe8a3; }
+  .label .n { display: inline-block; min-width: 1.5em; margin: 0 5px 0 -5px; padding: 0 4px; border-radius: 999px; background: #ff8f6b; color: #fff; text-align: center; }
+  .label .n:empty { display: none; }
+  button:disabled { opacity: .5; }
+  button.soft { background: var(--card); color: var(--ink); box-shadow: 0 3px 0 rgba(0,0,0,.12); }
   header { position: fixed; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: 8px; padding: max(12px, env(safe-area-inset-top)) 14px 0; pointer-events: none; }
   header > * { pointer-events: auto; }
   h1 { margin: 0; font-size: 20px; letter-spacing: .3px; }
@@ -28,7 +32,7 @@
   .grow { flex: 1; }
   select.pill { border: 0; font: inherit; font-size: 12px; font-weight: 700; color: var(--ink); }
   .pill, button { white-space: nowrap; }
-  @media (max-width: 520px) { #backend, #stylesLink { display: none; } header { gap: 6px; } button#addBtn { padding: 7px 11px; } }
+  @media (max-width: 520px) { #backend, #stylesLink, #addBtn .txt, #countPill { display: none; } header { gap: 6px; } header button { padding: 7px 12px; } select.pill { max-width: 104px; } }
   button { font: inherit; font-weight: 700; border: 0; border-radius: 999px; padding: 8px 14px; background: #ff8f6b; color: #fff; box-shadow: 0 3px 0 #d96c49; cursor: pointer; }
   button:active { transform: translateY(2px); box-shadow: 0 1px 0 #d96c49; }
   #panel { position: fixed; right: 14px; top: 64px; width: 260px; max-width: calc(100vw - 28px); background: var(--card); border-radius: 22px; padding: 14px; box-shadow: 0 6px 0 rgba(0,0,0,.08), 0 10px 30px rgba(0,0,0,.12); transform: translateY(-10px); opacity: 0; pointer-events: none; transition: .2s; }
@@ -63,12 +67,13 @@
 <div id="stage"></div>
 <header>
   <h1>Minis</h1>
-  <span class="pill"><span id="count">0</span> folks</span>
+  <span class="pill" id="countPill"><span id="count">0</span> folks</span>
   <span class="pill" id="backend">…</span>
   <span class="grow"></span>
   <select id="styleSel" class="pill" aria-label="Art style"></select>
   <a class="pill" id="stylesLink" href="styles.html" style="text-decoration:none;color:inherit">Styles</a>
-  <button id="addBtn">+ Add</button>
+  <button id="shuffleBtn" disabled>Shuffle</button>
+  <button id="addBtn" class="soft" aria-label="Add someone">+<span class="txt"> Add</span></button>
 </header>
 <aside id="panel"></aside>
 <div id="toast"></div>
