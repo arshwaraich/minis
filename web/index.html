@@ -38,7 +38,7 @@
   .grow { flex: 1; }
   select.pill { border: 0; font: inherit; font-size: 12px; font-weight: 700; color: var(--ink); }
   .pill, button { white-space: nowrap; }
-  @media (max-width: 520px) { #backend, #addBtn .txt, #countUnit { display: none; } header { gap: 6px; } header button { padding: 7px 12px; } select.pill { max-width: 104px; } }
+  @media (max-width: 520px) { #addBtn .txt, #countUnit { display: none; } header { gap: 6px; } header button { padding: 7px 12px; } select.pill { max-width: 104px; } }
   button { font: inherit; font-weight: 700; border: 0; border-radius: 999px; padding: 8px 14px; background: #ff8f6b; color: #fff; box-shadow: 0 3px 0 #d96c49; cursor: pointer; }
   button:active { transform: translateY(2px); box-shadow: 0 1px 0 #d96c49; }
   #toast { position: fixed; left: 50%; bottom: max(18px, env(safe-area-inset-bottom)); transform: translate(-50%, 20px); opacity: 0; background: var(--ink); color: #fff; padding: 8px 14px; border-radius: 999px; font-size: 13px; font-weight: 600; transition: .2s; pointer-events: none; max-width: calc(100vw - 28px); text-align: center; }
@@ -61,7 +61,6 @@
 <header>
   <h1>Minis</h1>
   <span class="pill" id="countPill"><span id="count">0</span><span id="countUnit"> folks</span></span>
-  <span class="pill" id="backend">…</span>
   <span class="grow"></span>
   <button id="nextBtn" disabled title="Mark the person at the front as done (N)">Next</button>
   <button id="shuffleBtn" class="soft" disabled title="New random order (S)">Shuffle</button>

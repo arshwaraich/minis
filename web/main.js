@@ -16,7 +16,7 @@ renderer.setSize(innerWidth, innerHeight);
 renderer.toneMapping = THREE.NoToneMapping;
 $('#stage').appendChild(renderer.domElement);
 await renderer.init();
-$('#backend').textContent = renderer.backend.isWebGPUBackend ? 'WebGPU' : 'WebGL 2';
+// renderer backend: renderer.backend.isWebGPUBackend (WebGPU) or WebGL 2 fallback
 
 const labels = new CSS2DRenderer();
 labels.setSize(innerWidth, innerHeight);
