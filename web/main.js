@@ -9,9 +9,9 @@ import { buildStandee } from './standee.js';
 const qs = new URLSearchParams(location.search);
 const $ = (s) => document.querySelector(s);
 const LOCAL_KEY = 'minis.added.v1';
-const STYLE_OPTS = { illustrated: 'Illustrated (AI)', ...Object.fromEntries(Object.entries(STYLES).map(([k, v]) => [k, v.label])) };
+const STYLE_OPTS = { illustrated: 'Illustrated (AI, flat)', ...Object.fromEntries(Object.entries(STYLES).map(([k, v]) => [k, v.label])) };
 const pickStyle = (v) => (v && STYLE_OPTS[v] ? v : null);
-const STYLE = pickStyle(qs.get('style')) || pickStyle(localStorage.getItem('minis.style')) || 'illustrated';
+const STYLE = pickStyle(qs.get('style')) || pickStyle(localStorage.getItem('minis.style')) || 'sprout';
 const MESH_STYLE = STYLES[STYLE] ? STYLE : 'sprout'; // fallback for people without an illustration
 
 // ------------------------------------------------------------------ renderer
